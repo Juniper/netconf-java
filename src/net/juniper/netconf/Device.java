@@ -1,8 +1,8 @@
 /**
-* Copyright (c) 2011 Juniper Networks, Inc.
+* Copyright (c) 2013 Juniper Networks, Inc.
 * All Rights Reserved
 *
-* JUNIPER PROPRIETARY/CONFIDENTIAL. Use is subject to license terms.
+* Use is subject to license terms.
 *
 */
 
