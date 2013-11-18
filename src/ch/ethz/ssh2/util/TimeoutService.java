@@ -1,9 +1,14 @@
+/*
+ * Copyright (c) 2006-2011 Christian Plattner. All rights reserved.
+ * Please refer to the LICENSE.txt for licensing details.
+ */
 
 package ch.ethz.ssh2.util;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedList;
 
 import ch.ethz.ssh2.log.Logger;
@@ -17,13 +22,13 @@ import ch.ethz.ssh2.log.Logger;
  * Only after new timeouts arrive a new thread (singleton) will be instantiated.
  * 
  * @author Christian Plattner
- * @version 2.50, 03/15/10
+ * @version $Id: TimeoutService.java 41 2011-06-02 10:36:41Z dkocher@sudo.ch $
  */
 public class TimeoutService
 {
 	private static final Logger log = Logger.getLogger(TimeoutService.class);
 
-	public static class TimeoutToken implements Comparable
+	public static class TimeoutToken
 	{
 		private long runTime;
 		private Runnable handler;
@@ -33,20 +38,11 @@ public class TimeoutService
 			this.runTime = runTime;
 			this.handler = handler;
 		}
-
-		public int compareTo(Object o)
-		{
-			TimeoutToken t = (TimeoutToken) o;
-			if (runTime > t.runTime)
-				return 1;
-			if (runTime == t.runTime)
-				return 0;
-			return -1;
-		}
 	}
 
 	private static class TimeoutThread extends Thread
 	{
+		@Override
 		public void run()
 		{
 			synchronized (todolist)
@@ -71,7 +67,7 @@ public class TimeoutService
 						{
 							todolist.wait(tt.runTime - now);
 						}
-						catch (InterruptedException e)
+						catch (InterruptedException ignored)
 						{
 						}
 
@@ -93,7 +89,7 @@ public class TimeoutService
 					{
 						StringWriter sw = new StringWriter();
 						e.printStackTrace(new PrintWriter(sw));
-						log.log(20, "Exeception in Timeout handler:" + e.getMessage() + "(" + sw.toString() + ")");
+						log.warning("Exeception in Timeout handler:" + e.getMessage() + "(" + sw.toString() + ")");
 					}
 				}
 			}
@@ -101,7 +97,7 @@ public class TimeoutService
 	}
 
 	/* The list object is also used for locking purposes */
-	private static final LinkedList todolist = new LinkedList();
+	private static final LinkedList<TimeoutToken> todolist = new LinkedList<TimeoutService.TimeoutToken>();
 
 	private static Thread timeoutThread = null;
 
@@ -112,14 +108,25 @@ public class TimeoutService
 	 * @param handler
 	 * @return a TimeoutToken that can be used to cancel the timeout.
 	 */
-	public static final TimeoutToken addTimeoutHandler(long runTime, Runnable handler)
+	public static TimeoutToken addTimeoutHandler(long runTime, Runnable handler)
 	{
 		TimeoutToken token = new TimeoutToken(runTime, handler);
 
 		synchronized (todolist)
 		{
 			todolist.add(token);
-			Collections.sort(todolist);
+
+			Collections.sort(todolist, new Comparator<TimeoutToken>()
+			{
+				public int compare(TimeoutToken o1, TimeoutToken o2)
+				{
+					if (o1.runTime > o2.runTime)
+						return 1;
+					if (o1.runTime == o2.runTime)
+						return 0;
+					return -1;
+				}
+			});
 
 			if (timeoutThread != null)
 				timeoutThread.interrupt();
@@ -134,7 +141,7 @@ public class TimeoutService
 		return token;
 	}
 
-	public static final void cancelTimeoutHandler(TimeoutToken token)
+	public static void cancelTimeoutHandler(TimeoutToken token)
 	{
 		synchronized (todolist)
 		{

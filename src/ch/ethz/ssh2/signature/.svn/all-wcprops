@@ -1,0 +1,53 @@
+K 25
+svn:wc:ra_dav:version-url
+V 75
+/svn/!svn/ver/81/tags/ganymed-ssh2-261/src/main/java/ch/ethz/ssh2/signature
+END
+DSAPublicKey.java
+K 25
+svn:wc:ra_dav:version-url
+V 93
+/svn/!svn/ver/81/tags/ganymed-ssh2-261/src/main/java/ch/ethz/ssh2/signature/DSAPublicKey.java
+END
+RSASHA1Verify.java
+K 25
+svn:wc:ra_dav:version-url
+V 94
+/svn/!svn/ver/81/tags/ganymed-ssh2-261/src/main/java/ch/ethz/ssh2/signature/RSASHA1Verify.java
+END
+RSASignature.java
+K 25
+svn:wc:ra_dav:version-url
+V 93
+/svn/!svn/ver/81/tags/ganymed-ssh2-261/src/main/java/ch/ethz/ssh2/signature/RSASignature.java
+END
+DSASHA1Verify.java
+K 25
+svn:wc:ra_dav:version-url
+V 94
+/svn/!svn/ver/81/tags/ganymed-ssh2-261/src/main/java/ch/ethz/ssh2/signature/DSASHA1Verify.java
+END
+RSAPrivateKey.java
+K 25
+svn:wc:ra_dav:version-url
+V 94
+/svn/!svn/ver/81/tags/ganymed-ssh2-261/src/main/java/ch/ethz/ssh2/signature/RSAPrivateKey.java
+END
+DSASignature.java
+K 25
+svn:wc:ra_dav:version-url
+V 93
+/svn/!svn/ver/81/tags/ganymed-ssh2-261/src/main/java/ch/ethz/ssh2/signature/DSASignature.java
+END
+DSAPrivateKey.java
+K 25
+svn:wc:ra_dav:version-url
+V 94
+/svn/!svn/ver/81/tags/ganymed-ssh2-261/src/main/java/ch/ethz/ssh2/signature/DSAPrivateKey.java
+END
+RSAPublicKey.java
+K 25
+svn:wc:ra_dav:version-url
+V 93
+/svn/!svn/ver/81/tags/ganymed-ssh2-261/src/main/java/ch/ethz/ssh2/signature/RSAPublicKey.java
+END

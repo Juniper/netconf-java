@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2006-2013 Christian Plattner. All rights reserved.
+ * Please refer to the LICENSE.txt for licensing details.
+ */
 
 package ch.ethz.ssh2.transport;
 
@@ -7,8 +11,10 @@ import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 import java.security.SecureRandom;
+import java.util.List;
 import java.util.Vector;
 
 import ch.ethz.ssh2.ConnectionInfo;
@@ -26,6 +32,9 @@ import ch.ethz.ssh2.log.Logger;
 import ch.ethz.ssh2.packets.PacketDisconnect;
 import ch.ethz.ssh2.packets.Packets;
 import ch.ethz.ssh2.packets.TypesReader;
+import ch.ethz.ssh2.server.ServerConnectionState;
+import ch.ethz.ssh2.signature.DSAPrivateKey;
+import ch.ethz.ssh2.signature.RSAPrivateKey;
 import ch.ethz.ssh2.util.StringEncoder;
 import ch.ethz.ssh2.util.Tokenizer;
 
@@ -47,36 +56,63 @@ import ch.ethz.ssh2.util.Tokenizer;
 
 /**
  * TransportManager.
- * 
+ *
  * @author Christian Plattner
- * @version 2.50, 03/15/10
+ * @version $Id: TransportManager.java 47 2013-07-31 23:59:52Z cleondris@gmail.com $
  */
 public class TransportManager
 {
 	private static final Logger log = Logger.getLogger(TransportManager.class);
 
-	class HandlerEntry
+	private static class HandlerEntry
 	{
 		MessageHandler mh;
 		int low;
 		int high;
 	}
 
-	private final Vector asynchronousQueue = new Vector();
+	private final List<AsynchronousEntry> asynchronousQueue = new Vector<AsynchronousEntry>();
 	private Thread asynchronousThread = null;
+	private boolean asynchronousPending = false;
+
+	class AsynchronousEntry
+	{
+		public byte[] msg;
+		public Runnable run;
+
+		public AsynchronousEntry(byte[] msg, Runnable run)
+		{
+			this.msg = msg;
+			this.run = run;
+		}
+	}
 
 	class AsynchronousWorker extends Thread
 	{
+		@Override
 		public void run()
 		{
 			while (true)
 			{
-				byte[] msg = null;
+				AsynchronousEntry item = null;
 
 				synchronized (asynchronousQueue)
 				{
 					if (asynchronousQueue.size() == 0)
 					{
+						/* Only now we may reset the flag, since we are sure that all queued items
+						 * have been sent (there is a slight delay between de-queuing and sending,
+						 * this is why we need this flag! See code below. Sending takes place outside
+						 * of this lock, this is why a test for size()==0 (from another thread) does not ensure
+						 * that all messages have been sent.
+						 */
+
+						asynchronousPending = false;
+
+						/* Notify any senders that they can proceed, all async messages have been delivered */
+
+						asynchronousQueue.notifyAll();
+
 						/* After the queue is empty for about 2 seconds, stop this thread */
 
 						try
@@ -94,7 +130,7 @@ public class TransportManager
 						}
 					}
 
-					msg = (byte[]) asynchronousQueue.remove(0);
+					item = asynchronousQueue.remove(0);
 				}
 
 				/* The following invocation may throw an IOException.
@@ -111,68 +147,84 @@ public class TransportManager
 
 				try
 				{
-					sendMessage(msg);
+					sendMessageImmediate(item.msg);
 				}
 				catch (IOException e)
 				{
 					return;
 				}
+
+				if (item.run != null)
+				{
+					try
+					{
+						item.run.run();
+					}
+					catch (Exception ignore)
+					{
+					}
+
+				}
 			}
 		}
 	}
 
-	String hostname;
-	int port;
-	final Socket sock = new Socket();
+	private Socket sock = new Socket();
 
-	Object connectionSemaphore = new Object();
+	private final Object connectionSemaphore = new Object();
 
-	boolean flagKexOngoing = false;
-	boolean connectionClosed = false;
+	private boolean flagKexOngoing = false;
+	private boolean connectionClosed = false;
 
-	Throwable reasonClosedCause = null;
+	private Throwable reasonClosedCause = null;
 
-	TransportConnection tc;
-	KexManager km;
+	private TransportConnection tc;
+	private KexManager km;
 
-	Vector messageHandlers = new Vector();
+	private final List<HandlerEntry> messageHandlers = new Vector<HandlerEntry>();
 
-	Thread receiveThread;
+	private Thread receiveThread;
 
-	Vector connectionMonitors = new Vector();
-	boolean monitorsWereInformed = false;
+	private List<ConnectionMonitor> connectionMonitors = new Vector<ConnectionMonitor>();
+	private boolean monitorsWereInformed = false;
 
 	/**
 	 * There were reports that there are JDKs which use
 	 * the resolver even though one supplies a dotted IP
 	 * address in the Socket constructor. That is why we
 	 * try to generate the InetAdress "by hand".
-	 * 
+	 *
 	 * @param host
 	 * @return the InetAddress
 	 * @throws UnknownHostException
 	 */
-	private InetAddress createInetAddress(String host) throws UnknownHostException
+	private static InetAddress createInetAddress(String host) throws UnknownHostException
 	{
 		/* Check if it is a dotted IP4 address */
 
 		InetAddress addr = parseIPv4Address(host);
 
 		if (addr != null)
+		{
 			return addr;
+		}
 
 		return InetAddress.getByName(host);
 	}
 
-	private InetAddress parseIPv4Address(String host) throws UnknownHostException
+	private static InetAddress parseIPv4Address(String host) throws UnknownHostException
 	{
 		if (host == null)
+		{
 			return null;
+		}
 
 		String[] quad = Tokenizer.parseTokens(host, '.');
 
 		if ((quad == null) || (quad.length != 4))
+		{
 			return null;
+		}
 
 		byte[] addr = new byte[4];
 
@@ -181,7 +233,9 @@ public class TransportManager
 			int part = 0;
 
 			if ((quad[i].length() == 0) || (quad[i].length() > 3))
+			{
 				return null;
+			}
 
 			for (int k = 0; k < quad[i].length(); k++)
 			{
@@ -189,24 +243,22 @@ public class TransportManager
 
 				/* No, Character.isDigit is not the same */
 				if ((c < '0') || (c > '9'))
+				{
 					return null;
+				}
 
 				part = part * 10 + (c - '0');
 			}
 
 			if (part > 255) /* 300.1.2.3 is invalid =) */
+			{
 				return null;
+			}
 
 			addr[i] = (byte) part;
 		}
 
 		return InetAddress.getByAddress(host, addr);
-	}
-
-	public TransportManager(String host, int port) throws IOException
-	{
-		this.hostname = host;
-		this.port = port;
 	}
 
 	public int getPacketOverheadEstimate()
@@ -275,7 +327,9 @@ public class TransportManager
 						byte[] msg = new PacketDisconnect(Packets.SSH_DISCONNECT_BY_APPLICATION, cause.getMessage(), "")
 								.getPayload();
 						if (tc != null)
+						{
 							tc.sendMessage(msg);
+						}
 					}
 					catch (IOException ignore)
 					{
@@ -298,7 +352,7 @@ public class TransportManager
 
 		/* No check if we need to inform the monitors */
 
-		Vector monitors = null;
+		List<ConnectionMonitor> monitors = new Vector<ConnectionMonitor>();
 
 		synchronized (this)
 		{
@@ -310,36 +364,33 @@ public class TransportManager
 			if (monitorsWereInformed == false)
 			{
 				monitorsWereInformed = true;
-				monitors = (Vector) connectionMonitors.clone();
+				monitors.addAll(connectionMonitors);
 			}
 		}
 
-		if (monitors != null)
+		for (ConnectionMonitor cmon : monitors)
 		{
-			for (int i = 0; i < monitors.size(); i++)
+			try
 			{
-				try
-				{
-					ConnectionMonitor cmon = (ConnectionMonitor) monitors.elementAt(i);
-					cmon.connectionLost(reasonClosedCause);
-				}
-				catch (Exception ignore)
-				{
-				}
+				cmon.connectionLost(reasonClosedCause);
+			}
+			catch (Exception ignore)
+			{
 			}
 		}
 	}
 
-	private void establishConnection(ProxyData proxyData, int connectTimeout) throws IOException
+	private static Socket establishConnection(String hostname, int port, ProxyData proxyData, int connectTimeout)
+			throws IOException
 	{
 		/* See the comment for createInetAddress() */
 
 		if (proxyData == null)
 		{
 			InetAddress addr = createInetAddress(hostname);
-			sock.connect(new InetSocketAddress(addr, port), connectTimeout);
-			sock.setSoTimeout(0);
-			return;
+			Socket s = new Socket();
+			s.connect(new InetSocketAddress(addr, port), connectTimeout);
+			return s;
 		}
 
 		if (proxyData instanceof HTTPProxyData)
@@ -349,12 +400,12 @@ public class TransportManager
 			/* At the moment, we only support HTTP proxies */
 
 			InetAddress addr = createInetAddress(pd.proxyHost);
-			sock.connect(new InetSocketAddress(addr, pd.proxyPort), connectTimeout);
-			sock.setSoTimeout(0);
+			Socket s = new Socket();
+			s.connect(new InetSocketAddress(addr, pd.proxyPort), connectTimeout);
 
 			/* OK, now tell the proxy where we actually want to connect to */
 
-			StringBuffer sb = new StringBuffer();
+			StringBuilder sb = new StringBuilder();
 
 			sb.append("CONNECT ");
 			sb.append(hostname);
@@ -385,7 +436,7 @@ public class TransportManager
 
 			sb.append("\r\n");
 
-			OutputStream out = sock.getOutputStream();
+			OutputStream out = s.getOutputStream();
 
 			out.write(StringEncoder.GetBytes(sb.toString()));
 			out.flush();
@@ -393,19 +444,23 @@ public class TransportManager
 			/* Now parse the HTTP response */
 
 			byte[] buffer = new byte[1024];
-			InputStream in = sock.getInputStream();
+			InputStream in = s.getInputStream();
 
 			int len = ClientServerHello.readLineRN(in, buffer);
 
 			String httpReponse = StringEncoder.GetString(buffer, 0, len);
 
 			if (httpReponse.startsWith("HTTP/") == false)
+			{
 				throw new IOException("The proxy did not send back a valid HTTP response.");
+			}
 
 			/* "HTTP/1.X XYZ X" => 14 characters minimum */
 
 			if ((httpReponse.length() < 14) || (httpReponse.charAt(8) != ' ') || (httpReponse.charAt(12) != ' '))
+			{
 				throw new IOException("The proxy did not send back a valid HTTP response.");
+			}
 
 			int errorCode = 0;
 
@@ -419,7 +474,9 @@ public class TransportManager
 			}
 
 			if ((errorCode < 0) || (errorCode > 999))
+			{
 				throw new IOException("The proxy did not send back a valid HTTP response.");
+			}
 
 			if (errorCode != 200)
 			{
@@ -432,33 +489,18 @@ public class TransportManager
 			{
 				len = ClientServerHello.readLineRN(in, buffer);
 				if (len == 0)
+				{
 					break;
+				}
 			}
-			return;
+			return s;
 		}
 
 		throw new IOException("Unsupported ProxyData");
 	}
 
-	public void initialize(CryptoWishList cwl, ServerHostKeyVerifier verifier, DHGexParameters dhgex,
-			int connectTimeout, SecureRandom rnd, ProxyData proxyData) throws IOException
+	private void startReceiver() throws IOException
 	{
-		/* First, establish the TCP connection to the SSH-2 server */
-
-		establishConnection(proxyData, connectTimeout);
-
-		/* Parse the server line and say hello - important: this information is later needed for the
-		 * key exchange (to stop man-in-the-middle attacks) - that is why we wrap it into an object
-		 * for later use.
-		 */
-
-		ClientServerHello csh = new ClientServerHello(sock.getInputStream(), sock.getOutputStream());
-
-		tc = new TransportConnection(sock.getInputStream(), sock.getOutputStream(), rnd);
-
-		km = new KexManager(this, csh, cwl, hostname, port, verifier, rnd);
-		km.initiateKEX(cwl, dhgex);
-
 		receiveThread = new Thread(new Runnable()
 		{
 			public void run()
@@ -467,16 +509,17 @@ public class TransportManager
 				{
 					receiveLoop();
 				}
-				catch (IOException e)
+				catch (Exception e)
 				{
 					close(e, false);
 
-					if (log.isEnabled())
-						log.log(10, "Receive thread: error in receiveLoop: " + e.getMessage());
+					log.warning("Receive thread: error in receiveLoop: " + e.getMessage());
 				}
 
-				if (log.isEnabled())
-					log.log(50, "Receive thread: back from receiveLoop");
+				if (log.isDebugEnabled())
+				{
+					log.debug("Receive thread: back from receiveLoop");
+				}
 
 				/* Tell all handlers that it is time to say goodbye */
 
@@ -486,14 +529,13 @@ public class TransportManager
 					{
 						km.handleMessage(null, 0);
 					}
-					catch (IOException e)
+					catch (IOException ignored)
 					{
 					}
 				}
 
-				for (int i = 0; i < messageHandlers.size(); i++)
+				for (HandlerEntry he : messageHandlers)
 				{
-					HandlerEntry he = (HandlerEntry) messageHandlers.elementAt(i);
 					try
 					{
 						he.mh.handleMessage(null, 0);
@@ -509,6 +551,51 @@ public class TransportManager
 		receiveThread.start();
 	}
 
+	public void clientInit(String hostname, int port, String softwareversion, CryptoWishList cwl,
+			ServerHostKeyVerifier verifier, DHGexParameters dhgex, int connectTimeout, SecureRandom rnd,
+			ProxyData proxyData) throws IOException
+	{
+		/* First, establish the TCP connection to the SSH-2 server */
+
+		sock = establishConnection(hostname, port, proxyData, connectTimeout);
+
+		/* Parse the server line and say hello - important: this information is later needed for the
+		 * key exchange (to stop man-in-the-middle attacks) - that is why we wrap it into an object
+		 * for later use.
+		 */
+
+		ClientServerHello csh = ClientServerHello.clientHello(softwareversion, sock.getInputStream(),
+				sock.getOutputStream());
+
+		tc = new TransportConnection(sock.getInputStream(), sock.getOutputStream(), rnd);
+
+		km = new ClientKexManager(this, csh, cwl, hostname, port, verifier, rnd);
+		km.initiateKEX(cwl, dhgex, null, null);
+
+		startReceiver();
+	}
+
+	public void serverInit(ServerConnectionState state) throws IOException
+	{
+		/* TCP connection is already established */
+
+		this.sock = state.s;
+
+		/* Parse the client line and say hello - important: this information is later needed for the
+		 * key exchange (to stop man-in-the-middle attacks) - that is why we wrap it into an object
+		 * for later use.
+		 */
+
+		state.csh = ClientServerHello.serverHello(state.softwareversion, sock.getInputStream(), sock.getOutputStream());
+
+		tc = new TransportConnection(sock.getInputStream(), sock.getOutputStream(), state.generator);
+
+		km = new ServerKexManager(state);
+		km.initiateKEX(state.next_cryptoWishList, null, state.next_dsa_key, state.next_rsa_key);
+
+		startReceiver();
+	}
+
 	public void registerMessageHandler(MessageHandler mh, int low, int high)
 	{
 		HandlerEntry he = new HandlerEntry();
@@ -518,7 +605,7 @@ public class TransportManager
 
 		synchronized (messageHandlers)
 		{
-			messageHandlers.addElement(he);
+			messageHandlers.add(he);
 		}
 	}
 
@@ -528,10 +615,10 @@ public class TransportManager
 		{
 			for (int i = 0; i < messageHandlers.size(); i++)
 			{
-				HandlerEntry he = (HandlerEntry) messageHandlers.elementAt(i);
+				HandlerEntry he = messageHandlers.get(i);
 				if ((he.mh == mh) && (he.low == low) && (he.high == high))
 				{
-					messageHandlers.removeElementAt(i);
+					messageHandlers.remove(i);
 					break;
 				}
 			}
@@ -570,9 +657,25 @@ public class TransportManager
 		}
 	}
 
-	public void forceKeyExchange(CryptoWishList cwl, DHGexParameters dhgex) throws IOException
+	/**
+	 * 
+	 * @param cwl
+	 * @param dhgex
+	 * @param dsa may be null if this is a client connection
+	 * @param rsa may be null if this is a client connection
+	 * @throws IOException
+	 */
+	public void forceKeyExchange(CryptoWishList cwl, DHGexParameters dhgex, DSAPrivateKey dsa, RSAPrivateKey rsa)
+			throws IOException
 	{
-		km.initiateKEX(cwl, dhgex);
+		synchronized (connectionSemaphore)
+		{
+			if (connectionClosed)
+				/* Inform the caller that there is no point in triggering a new kex */
+				throw (IOException) new IOException("Sorry, this connection is closed.").initCause(reasonClosedCause);
+		}
+
+		km.initiateKEX(cwl, dhgex, dsa, rsa);
 	}
 
 	public void changeRecvCipher(BlockCipher bc, MAC mac)
@@ -587,9 +690,15 @@ public class TransportManager
 
 	public void sendAsynchronousMessage(byte[] msg) throws IOException
 	{
+		sendAsynchronousMessage(msg, null);
+	}
+
+	public void sendAsynchronousMessage(byte[] msg, Runnable run) throws IOException
+	{
 		synchronized (asynchronousQueue)
 		{
-			asynchronousQueue.addElement(msg);
+			asynchronousQueue.add(new AsynchronousEntry(msg, run));
+			asynchronousPending = true;
 
 			/* This limit should be flexible enough. We need this, otherwise the peer
 			 * can flood us with global requests (and other stuff where we have to reply
@@ -598,7 +707,9 @@ public class TransportManager
 			 * (our send queue would grow and grow and...) */
 
 			if (asynchronousQueue.size() > 100)
+			{
 				throw new IOException("Error: the peer is not consuming our asynchronous replies.");
+			}
 
 			/* Check if we have an asynchronous sending thread */
 
@@ -610,21 +721,63 @@ public class TransportManager
 
 				/* The thread will stop after 2 seconds of inactivity (i.e., empty queue) */
 			}
+
+			asynchronousQueue.notifyAll();
 		}
 	}
 
-	public void setConnectionMonitors(Vector monitors)
+	public void setConnectionMonitors(List<ConnectionMonitor> monitors)
 	{
 		synchronized (this)
 		{
-			connectionMonitors = (Vector) monitors.clone();
+			connectionMonitors = new Vector<ConnectionMonitor>();
+			connectionMonitors.addAll(monitors);
 		}
 	}
 
+	/**
+	 * True if no response message expected.
+	 */
+	private boolean idle;
+
+	/**
+	 * Send a message but ensure that all queued messages are being sent first.
+	 * 
+	 * @param msg
+	 * @throws IOException
+	 */
 	public void sendMessage(byte[] msg) throws IOException
 	{
+		synchronized (asynchronousQueue)
+		{
+			while (asynchronousPending)
+			{
+				try
+				{
+					asynchronousQueue.wait(1000);
+				}
+				catch (InterruptedException e)
+				{
+				}
+			}
+		}
+
+		sendMessageImmediate(msg);
+	}
+
+	/**
+	 * Send message, ignore queued async messages that have not been delivered yet.
+	 * Will be called directly from the asynchronousThread thread.
+	 * 
+	 * @param msg
+	 * @throws IOException
+	 */
+	public void sendMessageImmediate(byte[] msg) throws IOException
+	{
 		if (Thread.currentThread() == receiveThread)
+		{
 			throw new IOException("Assertion error: sendMessage may never be invoked by the receiver thread!");
+		}
 
 		boolean wasInterrupted = false;
 
@@ -641,7 +794,9 @@ public class TransportManager
 					}
 
 					if (flagKexOngoing == false)
+					{
 						break;
+					}
 
 					try
 					{
@@ -656,6 +811,7 @@ public class TransportManager
 				try
 				{
 					tc.sendMessage(msg);
+					idle = false;
 				}
 				catch (IOException e)
 				{
@@ -677,21 +833,38 @@ public class TransportManager
 
 		while (true)
 		{
-			int msglen = tc.receiveMessage(msg, 0, msg.length);
+			int msglen;
+			try
+			{
+				msglen = tc.receiveMessage(msg, 0, msg.length);
+			}
+			catch (SocketTimeoutException e)
+			{
+				// Timeout in read
+				if (idle)
+				{
+					log.debug("Ignoring socket timeout");
+					continue;
+				}
+				throw e;
+			}
+			idle = true;
 
 			int type = msg[0] & 0xff;
 
 			if (type == Packets.SSH_MSG_IGNORE)
+			{
 				continue;
+			}
 
 			if (type == Packets.SSH_MSG_DEBUG)
 			{
-				if (log.isEnabled())
+				if (log.isDebugEnabled())
 				{
 					TypesReader tr = new TypesReader(msg, 0, msglen);
 					tr.readByte();
 					tr.readBoolean();
-					StringBuffer debugMessageBuffer = new StringBuffer();
+					StringBuilder debugMessageBuffer = new StringBuilder();
 					debugMessageBuffer.append(tr.readString("UTF-8"));
 
 					for (int i = 0; i < debugMessageBuffer.length(); i++)
@@ -699,11 +872,13 @@ public class TransportManager
 						char c = debugMessageBuffer.charAt(i);
 
 						if ((c >= 32) && (c <= 126))
+						{
 							continue;
+						}
 						debugMessageBuffer.setCharAt(i, '\uFFFD');
 					}
 
-					log.log(50, "DEBUG Message from remote: '" + debugMessageBuffer.toString() + "'");
+					log.debug("DEBUG Message from remote: '" + debugMessageBuffer.toString() + "'");
 				}
 				continue;
 			}
@@ -718,7 +893,7 @@ public class TransportManager
 				TypesReader tr = new TypesReader(msg, 0, msglen);
 				tr.readByte();
 				int reason_code = tr.readUINT32();
-				StringBuffer reasonBuffer = new StringBuffer();
+				StringBuilder reasonBuffer = new StringBuilder();
 				reasonBuffer.append(tr.readString("UTF-8"));
 
 				/*
@@ -746,7 +921,9 @@ public class TransportManager
 					char c = reasonBuffer.charAt(i);
 
 					if ((c >= 32) && (c <= 126))
+					{
 						continue;
+					}
 					reasonBuffer.setCharAt(i, '\uFFFD');
 				}
 
@@ -769,7 +946,7 @@ public class TransportManager
 
 			for (int i = 0; i < messageHandlers.size(); i++)
 			{
-				HandlerEntry he = (HandlerEntry) messageHandlers.elementAt(i);
+				HandlerEntry he = messageHandlers.get(i);
 				if ((he.low <= type) && (type <= he.high))
 				{
 					mh = he.mh;
@@ -778,7 +955,9 @@ public class TransportManager
 			}
 
 			if (mh == null)
+			{
 				throw new IOException("Unexpected SSH message (type " + type + ")");
+			}
 
 			mh.handleMessage(msg, msglen);
 		}

@@ -1,4 +1,7 @@
-
+/*
+ * Copyright (c) 2006-2011 Christian Plattner. All rights reserved.
+ * Please refer to the LICENSE.txt for licensing details.
+ */
 package ch.ethz.ssh2.signature;
 
 import java.io.IOException;
@@ -14,7 +17,7 @@ import ch.ethz.ssh2.packets.TypesWriter;
  * DSASHA1Verify.
  * 
  * @author Christian Plattner
- * @version 2.50, 03/15/10
+ * @version $Id: DSASHA1Verify.java 41 2011-06-02 10:36:41Z dkocher@sudo.ch $
  */
 public class DSASHA1Verify
 {
@@ -113,9 +116,9 @@ public class DSASHA1Verify
 		System.arraycopy(rsArray, 20, tmp, 0, 20);
 		BigInteger s = new BigInteger(1, tmp);
 
-		if (log.isEnabled())
+		if (log.isDebugEnabled())
 		{
-			log.log(30, "decoded ssh-dss signature: first bytes r(" + ((rsArray[0]) & 0xff) + "), s("
+			log.debug("decoded ssh-dss signature: first bytes r(" + ((rsArray[0]) & 0xff) + "), s("
 					+ ((rsArray[20]) & 0xff) + ")");
 		}
 
@@ -143,26 +146,26 @@ public class DSASHA1Verify
 
 		BigInteger zero = BigInteger.ZERO;
 
-		if (log.isEnabled())
+		if (log.isDebugEnabled())
 		{
-			log.log(60, "ssh-dss signature: m: " + m.toString(16));
-			log.log(60, "ssh-dss signature: r: " + r.toString(16));
-			log.log(60, "ssh-dss signature: s: " + s.toString(16));
-			log.log(60, "ssh-dss signature: g: " + g.toString(16));
-			log.log(60, "ssh-dss signature: p: " + p.toString(16));
-			log.log(60, "ssh-dss signature: q: " + q.toString(16));
-			log.log(60, "ssh-dss signature: y: " + y.toString(16));
+			log.debug("ssh-dss signature: m: " + m.toString(16));
+			log.debug("ssh-dss signature: r: " + r.toString(16));
+			log.debug("ssh-dss signature: s: " + s.toString(16));
+			log.debug("ssh-dss signature: g: " + g.toString(16));
+			log.debug("ssh-dss signature: p: " + p.toString(16));
+			log.debug("ssh-dss signature: q: " + q.toString(16));
+			log.debug("ssh-dss signature: y: " + y.toString(16));
 		}
 
 		if (zero.compareTo(r) >= 0 || q.compareTo(r) <= 0)
 		{
-			log.log(20, "ssh-dss signature: zero.compareTo(r) >= 0 || q.compareTo(r) <= 0");
+			log.warning("ssh-dss signature: zero.compareTo(r) >= 0 || q.compareTo(r) <= 0");
 			return false;
 		}
 
 		if (zero.compareTo(s) >= 0 || q.compareTo(s) <= 0)
 		{
-			log.log(20, "ssh-dss signature: zero.compareTo(s) >= 0 || q.compareTo(s) <= 0");
+			log.warning("ssh-dss signature: zero.compareTo(s) >= 0 || q.compareTo(s) <= 0");
 			return false;
 		}
 

@@ -1,4 +1,7 @@
-
+/*
+ * Copyright (c) 2006-2011 Christian Plattner. All rights reserved.
+ * Please refer to the LICENSE.txt for licensing details.
+ */
 package ch.ethz.ssh2.crypto;
 
 import java.io.BufferedReader;
@@ -18,16 +21,16 @@ import ch.ethz.ssh2.util.StringEncoder;
 
 /**
  * PEM Support.
- * 
+ *
  * @author Christian Plattner
- * @version 2.50, 03/15/10
+ * @version $Id: PEMDecoder.java 37 2011-05-28 22:31:46Z dkocher@sudo.ch $
  */
 public class PEMDecoder
 {
 	private static final int PEM_RSA_PRIVATE_KEY = 1;
 	private static final int PEM_DSA_PRIVATE_KEY = 2;
 
-	private static final int hexToInt(char c)
+	private static int hexToInt(char c)
 	{
 		if ((c >= 'a') && (c <= 'f'))
 		{
@@ -107,12 +110,12 @@ public class PEMDecoder
 		int rfc_1423_padding = buff[buff.length - 1] & 0xff;
 
 		if ((rfc_1423_padding < 1) || (rfc_1423_padding > blockSize))
-			throw new IOException("Decrypted PEM has wrong padding, did you specify the correct password?");
+			throw new PEMDecryptException("Decrypted PEM has wrong padding, did you specify the correct password?");
 
 		for (int i = 2; i <= rfc_1423_padding; i++)
 		{
 			if (buff[buff.length - i] != rfc_1423_padding)
-				throw new IOException("Decrypted PEM has wrong padding, did you specify the correct password?");
+				throw new PEMDecryptException("Decrypted PEM has wrong padding, did you specify the correct password?");
 		}
 
 		byte[] tmp = new byte[buff.length - rfc_1423_padding];
@@ -120,7 +123,7 @@ public class PEMDecoder
 		return tmp;
 	}
 
-	private static final PEMStructure parsePEM(char[] pem) throws IOException
+	private static PEMStructure parsePEM(char[] pem) throws IOException
 	{
 		PEMStructure ps = new PEMStructure();
 
@@ -193,7 +196,7 @@ public class PEMDecoder
 			/* Ignore line */
 		}
 
-		StringBuffer keyData = new StringBuffer();
+		StringBuilder keyData = new StringBuilder();
 
 		while (true)
 		{
@@ -221,7 +224,7 @@ public class PEMDecoder
 		return ps;
 	}
 
-	private static final void decryptPEM(PEMStructure ps, byte[] pw) throws IOException
+	private static void decryptPEM(PEMStructure ps, byte[] pw) throws IOException
 	{
 		if (ps.dekInfo == null)
 			throw new IOException("Broken PEM, no mode and salt given, but encryption enabled");
@@ -306,6 +309,11 @@ public class PEMDecoder
 			return true;
 
 		return false;
+	}
+
+	public static final boolean isPEMEncrypted(char[] pem) throws IOException
+	{
+		return isPEMEncrypted(parsePEM(pem));
 	}
 
 	public static Object decode(char[] pem, String password) throws IOException

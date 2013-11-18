@@ -1,4 +1,7 @@
-
+/*
+ * Copyright (c) 2006-2011 Christian Plattner. All rights reserved.
+ * Please refer to the LICENSE.txt for licensing details.
+ */
 package ch.ethz.ssh2.channel;
 
 import java.io.IOException;
@@ -11,9 +14,9 @@ import ch.ethz.ssh2.util.StringEncoder;
 
 /**
  * RemoteX11AcceptThread.
- * 
+ *
  * @author Christian Plattner
- * @version 2.50, 03/15/10
+ * @version $Id: RemoteX11AcceptThread.java 41 2011-06-02 10:36:41Z dkocher@sudo.ch $
  */
 public class RemoteX11AcceptThread extends Thread
 {
@@ -33,6 +36,7 @@ public class RemoteX11AcceptThread extends Thread
 		this.remoteOriginatorPort = remoteOriginatorPort;
 	}
 
+	@Override
 	public void run()
 	{
 		try
@@ -89,7 +93,7 @@ public class RemoteX11AcceptThread extends Thread
 				throw new IOException("Unknown endian format in X11 message!");
 
 			/* Yes, I came up with this myself - shall I file an application for a patent? =) */
-			
+
 			int idxMSB = (header[0] == 0x42) ? 0 : 1;
 
 			/* Read authorization data header */
@@ -131,7 +135,7 @@ public class RemoteX11AcceptThread extends Thread
 			if (authProtocolDataLength != 16)
 				throw new IOException("Wrong data length for X11 authorization data!");
 
-			StringBuffer tmp = new StringBuffer(32);
+			StringBuilder tmp = new StringBuilder(32);
 			for (int i = 0; i < authProtocolData.length; i++)
 			{
 				String digit2 = Integer.toHexString(authProtocolData[i] & 0xff);
@@ -208,7 +212,7 @@ public class RemoteX11AcceptThread extends Thread
 				{
 					r2l.join();
 				}
-				catch (InterruptedException e)
+				catch (InterruptedException ignored)
 				{
 				}
 			}
@@ -220,13 +224,13 @@ public class RemoteX11AcceptThread extends Thread
 		}
 		catch (IOException e)
 		{
-			log.log(50, "IOException in X11 proxy code: " + e.getMessage());
+			log.warning("IOException in X11 proxy code: " + e.getMessage());
 
 			try
 			{
 				c.cm.closeChannel(c, "IOException in X11 proxy code (" + e.getMessage() + ")", true);
 			}
-			catch (IOException e1)
+			catch (IOException ignored)
 			{
 			}
 			try
@@ -234,7 +238,7 @@ public class RemoteX11AcceptThread extends Thread
 				if (s != null)
 					s.close();
 			}
-			catch (IOException e1)
+			catch (IOException ignored)
 			{
 			}
 		}

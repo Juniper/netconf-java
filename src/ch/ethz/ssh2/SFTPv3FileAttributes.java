@@ -1,12 +1,15 @@
-
+/*
+ * Copyright (c) 2006-2011 Christian Plattner. All rights reserved.
+ * Please refer to the LICENSE.txt for licensing details.
+ */
 package ch.ethz.ssh2;
 
 /**
  * A <code>SFTPv3FileAttributes</code> object represents detail information
  * about a file on the server. Not all fields may/must be present.
- * 
- * @author Christian Plattner
- * @version 2.50, 03/15/10
+ *
+ * @author Christian Plattner, plattner@inf.ethz.ch
+ * @version $Id: SFTPv3FileAttributes.java 42 2011-06-02 15:34:20Z dkocher@sudo.ch $
  */
 
 public class SFTPv3FileAttributes
@@ -32,7 +35,7 @@ public class SFTPv3FileAttributes
 	 * Here is a list:
 	 * <p>
 	 * <pre>Note: these numbers are all OCTAL.
-	 *  
+	 *
 	 *  S_IFMT     0170000   bitmask for the file type bitfields
 	 *  S_IFSOCK   0140000   socket
 	 *  S_IFLNK    0120000   symbolic link
@@ -40,11 +43,11 @@ public class SFTPv3FileAttributes
 	 *  S_IFBLK    0060000   block device
 	 *  S_IFDIR    0040000   directory
 	 *  S_IFCHR    0020000   character device
-	 *  S_IFIFO    0010000   fifo 
+	 *  S_IFIFO    0010000   fifo
 	 *  S_ISUID    0004000   set UID bit
-	 *  S_ISGID    0002000   set GID bit 
+	 *  S_ISGID    0002000   set GID bit
 	 *  S_ISVTX    0001000   sticky bit
-	 *  
+	 *
 	 *  S_IRWXU    00700     mask for file owner permissions
 	 *  S_IRUSR    00400     owner has read permission
 	 *  S_IWUSR    00200     owner has write permission
@@ -75,7 +78,7 @@ public class SFTPv3FileAttributes
 
 	/**
 	 * Checks if this entry is a directory.
-	 * 
+	 *
 	 * @return Returns true if permissions are available and they indicate
 	 *         that this entry represents a directory.
 	 */
@@ -83,13 +86,13 @@ public class SFTPv3FileAttributes
 	{
 		if (permissions == null)
 			return false;
-		
-		return ((permissions.intValue() & 0040000) != 0);
+
+		return ((permissions.intValue() & 0040000) == 0040000);
 	}
-	
+
 	/**
 	 * Checks if this entry is a regular file.
-	 * 
+	 *
 	 * @return Returns true if permissions are available and they indicate
 	 *         that this entry represents a regular file.
 	 */
@@ -97,13 +100,13 @@ public class SFTPv3FileAttributes
 	{
 		if (permissions == null)
 			return false;
-		
-		return ((permissions.intValue() & 0100000) != 0);
+
+		return ((permissions.intValue() & 0100000) == 0100000);
 	}
-	
+
 	/**
 	 * Checks if this entry is a a symlink.
-	 * 
+	 *
 	 * @return Returns true if permissions are available and they indicate
 	 *         that this entry represents a symlink.
 	 */
@@ -111,10 +114,10 @@ public class SFTPv3FileAttributes
 	{
 		if (permissions == null)
 			return false;
-		
-		return ((permissions.intValue() & 0120000) != 0);
+
+		return ((permissions.intValue() & 0120000) == 0120000);
 	}
-	
+
 	/**
 	 * Turn the POSIX permissions into a 7 digit octal representation.
 	 * Note: the returned value is first masked with <code>0177777</code>.
@@ -128,7 +131,7 @@ public class SFTPv3FileAttributes
 
 		String res = Integer.toString(permissions.intValue() & 0177777, 8);
 
-		StringBuffer sb = new StringBuffer();
+		StringBuilder sb = new StringBuilder();
 
 		int leadingZeros = 7 - res.length();
 

@@ -1,49 +1,65 @@
+/*
+ * Copyright (c) 2006-2011 Christian Plattner. All rights reserved.
+ * Please refer to the LICENSE.txt for licensing details.
+ */
 
 package ch.ethz.ssh2.log;
 
-/**
- * Logger - a very simple logger, mainly used during development.
- * Is not based on log4j (to reduce external dependencies).
- * However, if needed, something like log4j could easily be
- * hooked in.
- * 
- * @author Christian Plattner
- * @version 2.50, 03/15/10
- */
+import java.util.logging.Level;
 
+/**
+ * Logger delegating to JRE logging. By default, this is disabled and only
+ * used during development.
+ *
+ * @author Christian Plattner
+ * @version $Id: Logger.java 49 2013-08-01 12:28:42Z cleondris@gmail.com $
+ */
 public class Logger
 {
-	private static final boolean enabled = false;
-	private static final int logLevel = 99;
+	private java.util.logging.Logger delegate;
 
-	private String className;
+	public static volatile boolean enabled = false;
 
-	public final static Logger getLogger(Class x)
+	public static Logger getLogger(Class<?> x)
 	{
 		return new Logger(x);
 	}
 
-	public Logger(Class x)
+	public Logger(Class<?> x)
 	{
-		this.className = x.getName();
+		this.delegate = java.util.logging.Logger.getLogger(x.getName());
 	}
 
-	public final boolean isEnabled()
+	public boolean isDebugEnabled()
 	{
-		return enabled;
+		return enabled && delegate.isLoggable(Level.FINER);
 	}
 
-	public final void log(int level, String message)
+	public void debug(String message)
 	{
-		if ((enabled) && (level <= logLevel))
-		{
-			long now = System.currentTimeMillis();
+		if (enabled)
+			delegate.fine(message);
+	}
 
-			synchronized (this)
-			{
-				System.err.println(now + " : " + className + ": " + message);
-				// or send it to log4j or whatever...
-			}
-		}
+	public boolean isInfoEnabled()
+	{
+		return enabled && delegate.isLoggable(Level.FINE);
+	}
+
+	public void info(String message)
+	{
+		if (enabled)
+			delegate.info(message);
+	}
+
+	public boolean isWarningEnabled()
+	{
+		return enabled && delegate.isLoggable(Level.WARNING);
+	}
+
+	public void warning(String message)
+	{
+		if (enabled)
+			delegate.warning(message);
 	}
 }

@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2006-2011 Christian Plattner. All rights reserved.
+ * Please refer to the LICENSE.txt for licensing details.
+ */
 
 package ch.ethz.ssh2.transport;
 
@@ -5,21 +9,24 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 
-import ch.ethz.ssh2.Connection;
 import ch.ethz.ssh2.util.StringEncoder;
 
 /**
  * ClientServerHello.
  * 
  * @author Christian Plattner
- * @version 2.50, 03/15/10
+ * @version $Id: ClientServerHello.java 52 2013-08-01 13:26:01Z cleondris@gmail.com $
  */
 public class ClientServerHello
 {
-	String server_line;
 	String client_line;
+	String server_line;
 
-	String server_versioncomment;
+	private ClientServerHello(String client_line, String server_line)
+	{
+		this.client_line = client_line;
+		this.server_line = server_line;
+	}
 
 	public final static int readLineRN(InputStream is, byte[] buffer) throws IOException
 	{
@@ -44,45 +51,60 @@ public class ClientServerHello
 				break;
 
 			if (need10 == true)
-				throw new IOException("Malformed line sent by the server, the line does not end correctly.");
+				throw new IOException("Malformed line received, the line does not end correctly.");
 
 			len++;
 			if (pos >= buffer.length)
-				throw new IOException("The server sent a too long line.");
+				throw new IOException("The other party sent a too long line.");
 		}
 
 		return len;
 	}
 
-	public ClientServerHello(InputStream bi, OutputStream bo) throws IOException
+	public static ClientServerHello clientHello(String softwareversion, InputStream bi, OutputStream bo)
+			throws IOException
 	{
-		client_line = "SSH-2.0-" + Connection.identification;
+		return exchange(softwareversion, bi, bo, true);
+	}
 
-		bo.write(StringEncoder.GetBytes(client_line + "\r\n"));
+	public static ClientServerHello serverHello(String softwareversion, InputStream bi, OutputStream bo)
+			throws IOException
+	{
+		return exchange(softwareversion, bi, bo, false);
+	}
+
+	private static ClientServerHello exchange(String softwareversion, InputStream bi, OutputStream bo, boolean clientMode)
+			throws IOException
+	{
+		String localIdentifier = "SSH-2.0-" + softwareversion;
+		String remoteIdentifier = null;
+
+		bo.write(StringEncoder.GetBytes(localIdentifier + "\r\n"));
 		bo.flush();
 
-		byte[] serverVersion = new byte[512];
+		byte[] remoteData = new byte[1024];
 
 		for (int i = 0; i < 50; i++)
 		{
-			int len = readLineRN(bi, serverVersion);
+			int len = readLineRN(bi, remoteData);
 
-			server_line = StringEncoder.GetString(serverVersion, 0, len);
+			remoteIdentifier = StringEncoder.GetString(remoteData, 0, len);
 
-			if (server_line.startsWith("SSH-"))
+			if (remoteIdentifier.startsWith("SSH-"))
 				break;
 		}
 
-		if (server_line.startsWith("SSH-") == false)
+		if (remoteIdentifier.startsWith("SSH-") == false)
 			throw new IOException(
-					"Malformed server identification string. There was no line starting with 'SSH-' amongst the first 50 lines.");
+					"Malformed SSH identification string. There was no line starting with 'SSH-' amongst the first 50 lines.");
 
-		if (server_line.startsWith("SSH-1.99-"))
-			server_versioncomment = server_line.substring(9);
-		else if (server_line.startsWith("SSH-2.0-"))
-			server_versioncomment = server_line.substring(8);
+		if (!remoteIdentifier.startsWith("SSH-1.99-") && !remoteIdentifier.startsWith("SSH-2.0-"))
+			throw new IOException("Remote party uses incompatible protocol, it is not SSH-2 compatible.");
+
+		if (clientMode)
+			return new ClientServerHello(localIdentifier, remoteIdentifier);
 		else
-			throw new IOException("Server uses incompatible protocol, it is not SSH-2 compatible.");
+			return new ClientServerHello(remoteIdentifier, localIdentifier);
 	}
 
 	/**

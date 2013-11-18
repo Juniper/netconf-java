@@ -1,57 +1,63 @@
-
+/*
+ * Copyright (c) 2006-2011 Christian Plattner. All rights reserved.
+ * Please refer to the LICENSE.txt for licensing details.
+ */
 package ch.ethz.ssh2.channel;
 
 /**
  * Channel.
- * 
+ *
  * @author Christian Plattner
- * @version 2.50, 03/15/10
+ * @version $Id: Channel.java 47 2013-07-31 23:59:52Z cleondris@gmail.com $
  */
 public class Channel
 {
 	/*
-	 * OK. Here is an important part of the JVM Specification:
-	 * (http://java.sun.com/docs/books/vmspec/2nd-edition/html/Threads.doc.html#22214)
-	 * 
-	 * Any association between locks and variables is purely conventional.
-	 * Locking any lock conceptually flushes all variables from a thread's
-	 * working memory, and unlocking any lock forces the writing out to main
-	 * memory of all variables that the thread has assigned. That a lock may be
-	 * associated with a particular object or a class is purely a convention.
-	 * (...)
-	 * 
-	 * If a thread uses a particular shared variable only after locking a
-	 * particular lock and before the corresponding unlocking of that same lock,
-	 * then the thread will read the shared value of that variable from main
-	 * memory after the lock operation, if necessary, and will copy back to main
-	 * memory the value most recently assigned to that variable before the
-	 * unlock operation.
-	 * 
-	 * This, in conjunction with the mutual exclusion rules for locks, suffices
-	 * to guarantee that values are correctly transmitted from one thread to
-	 * another through shared variables.
-	 * 
-	 * ====> Always keep that in mind when modifying the Channel/ChannelManger
-	 * code.
-	 * 
-	 */
+		  * OK. Here is an important part of the JVM Specification:
+		  * (http://java.sun.com/docs/books/vmspec/2nd-edition/html/Threads.doc.html#22214)
+		  *
+		  * Any association between locks and variables is purely conventional.
+		  * Locking any lock conceptually flushes all variables from a thread's
+		  * working memory, and unlocking any lock forces the writing out to main
+		  * memory of all variables that the thread has assigned. That a lock may be
+		  * associated with a particular object or a class is purely a convention.
+		  * (...)
+		  *
+		  * If a thread uses a particular shared variable only after locking a
+		  * particular lock and before the corresponding unlocking of that same lock,
+		  * then the thread will read the shared value of that variable from main
+		  * memory after the lock operation, if necessary, and will copy back to main
+		  * memory the value most recently assigned to that variable before the
+		  * unlock operation.
+		  *
+		  * This, in conjunction with the mutual exclusion rules for locks, suffices
+		  * to guarantee that values are correctly transmitted from one thread to
+		  * another through shared variables.
+		  *
+		  * ====> Always keep that in mind when modifying the Channel/ChannelManger
+		  * code.
+		  *
+		  */
 
-	static final int STATE_OPENING = 1;
-	static final int STATE_OPEN = 2;
-	static final int STATE_CLOSED = 4;
+	public static final int STATE_OPENING = 1;
+	public static final int STATE_OPEN = 2;
+	public static final int STATE_CLOSED = 4;
 
-	static final int CHANNEL_BUFFER_SIZE = 30000;
+	static final int CHANNEL_BUFFER_SIZE = 32 * 1024 * 3 * 2;
 
 	/*
-	 * To achieve correctness, the following rules have to be respected when
-	 * accessing this object:
-	 */
+		  * To achieve correctness, the following rules have to be respected when
+		  * accessing this object:
+		  */
 
 	// These fields can always be read
 	final ChannelManager cm;
 	final ChannelOutputStream stdinStream;
 	final ChannelInputStream stdoutStream;
 	final ChannelInputStream stderrStream;
+
+	// In case this channel belongs to a server-side session.
+	ServerSessionImpl ss;
 
 	// These two fields will only be written while the Channel is in state
 	// STATE_OPENING.
@@ -66,35 +72,35 @@ public class Channel
 	int remoteID = -1;
 
 	/*
-	 * Make sure that we never send a data/EOF/WindowChange msg after a CLOSE
-	 * msg.
-	 * 
-	 * This is a little bit complicated, but we have to do it in that way, since
-	 * we cannot keep a lock on the Channel during the send operation (this
-	 * would block sometimes the receiver thread, and, in extreme cases, can
-	 * lead to a deadlock on both sides of the connection (senders are blocked
-	 * since the receive buffers on the other side are full, and receiver
-	 * threads wait for the senders to finish). It all depends on the
-	 * implementation on the other side. But we cannot make any assumptions, we
-	 * have to assume the worst case. Confused? Just believe me.
-	 */
+		  * Make sure that we never send a data/EOF/WindowChange msg after a CLOSE
+		  * msg.
+		  *
+		  * This is a little bit complicated, but we have to do it in that way, since
+		  * we cannot keep a lock on the Channel during the send operation (this
+		  * would block sometimes the receiver thread, and, in extreme cases, can
+		  * lead to a deadlock on both sides of the connection (senders are blocked
+		  * since the receive buffers on the other side are full, and receiver
+		  * threads wait for the senders to finish). It all depends on the
+		  * implementation on the other side. But we cannot make any assumptions, we
+		  * have to assume the worst case. Confused? Just believe me.
+		  */
 
 	/*
-	 * If you send a message on a channel, then you have to aquire the
-	 * "channelSendLock" and check the "closeMessageSent" flag (this variable
-	 * may only be accessed while holding the "channelSendLock" !!!
-	 * 
-	 * BTW: NEVER EVER SEND MESSAGES FROM THE RECEIVE THREAD - see explanation
-	 * above.
-	 */
+		  * If you send a message on a channel, then you have to aquire the
+		  * "channelSendLock" and check the "closeMessageSent" flag (this variable
+		  * may only be accessed while holding the "channelSendLock" !!!
+		  *
+		  * BTW: NEVER EVER SEND MESSAGES FROM THE RECEIVE THREAD - see explanation
+		  * above.
+		  */
 
 	final Object channelSendLock = new Object();
 	boolean closeMessageSent = false;
 
 	/*
-	 * Stop memory fragmentation by allocating this often used buffer.
-	 * May only be used while holding the channelSendLock
-	 */
+		  * Stop memory fragmentation by allocating this often used buffer.
+		  * May only be used while holding the channelSendLock
+		  */
 
 	final byte[] msgWindowAdjust = new byte[9];
 
@@ -106,8 +112,8 @@ public class Channel
 	boolean closeMessageRecv = false;
 
 	/* This is a stupid implementation. At the moment we can only wait
-	 * for one pending request per channel.
-	 */
+		  * for one pending request per channel.
+		  */
 	int successCounter = 0;
 	int failedCounter = 0;
 
@@ -148,7 +154,7 @@ public class Channel
 		this.cm = cm;
 
 		this.localWindow = CHANNEL_BUFFER_SIZE;
-		this.localMaxPacketSize = 35000 - 1024; // leave enough slack
+		this.localMaxPacketSize = 32 * 1024;
 
 		this.stdinStream = new ChannelOutputStream(this);
 		this.stdoutStream = new ChannelInputStream(this, false);
@@ -201,7 +207,14 @@ public class Channel
 		synchronized (reasonClosedLock)
 		{
 			if (this.reasonClosed == null)
+			{
 				this.reasonClosed = reasonClosed;
+			}
 		}
+	}
+
+	public int getState()
+	{
+		return this.state;
 	}
 }

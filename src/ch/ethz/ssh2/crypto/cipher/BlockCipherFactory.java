@@ -1,17 +1,22 @@
-
+/*
+ * Copyright (c) 2006-2011 Christian Plattner. All rights reserved.
+ * Please refer to the LICENSE.txt for licensing details.
+ */
 package ch.ethz.ssh2.crypto.cipher;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Vector;
 
 /**
  * BlockCipherFactory.
- * 
+ *
  * @author Christian Plattner
- * @version 2.50, 03/15/10
+ * @version $Id: BlockCipherFactory.java 47 2013-07-31 23:59:52Z cleondris@gmail.com $
  */
 public class BlockCipherFactory
 {
-	static class CipherEntry
+	private static final class CipherEntry
 	{
 		String type;
 		int blocksize;
@@ -27,49 +32,50 @@ public class BlockCipherFactory
 		}
 	}
 
-	static Vector ciphers = new Vector();
+	private static final List<CipherEntry> ciphers = new Vector<CipherEntry>();
 
 	static
 	{
 		/* Higher Priority First */
+		ciphers.add(new CipherEntry("aes128-ctr", 16, 16, "ch.ethz.ssh2.crypto.cipher.AES"));
+		ciphers.add(new CipherEntry("aes192-ctr", 16, 24, "ch.ethz.ssh2.crypto.cipher.AES"));
+		ciphers.add(new CipherEntry("aes256-ctr", 16, 32, "ch.ethz.ssh2.crypto.cipher.AES"));
+		ciphers.add(new CipherEntry("blowfish-ctr", 8, 16, "ch.ethz.ssh2.crypto.cipher.BlowFish"));
 
-		ciphers.addElement(new CipherEntry("aes256-ctr", 16, 32, "ch.ethz.ssh2.crypto.cipher.AES"));
-		ciphers.addElement(new CipherEntry("aes192-ctr", 16, 24, "ch.ethz.ssh2.crypto.cipher.AES"));
-		ciphers.addElement(new CipherEntry("aes128-ctr", 16, 16, "ch.ethz.ssh2.crypto.cipher.AES"));
-		ciphers.addElement(new CipherEntry("blowfish-ctr", 8, 16, "ch.ethz.ssh2.crypto.cipher.BlowFish"));
+		ciphers.add(new CipherEntry("aes128-cbc", 16, 16, "ch.ethz.ssh2.crypto.cipher.AES"));
+		ciphers.add(new CipherEntry("aes192-cbc", 16, 24, "ch.ethz.ssh2.crypto.cipher.AES"));
+		ciphers.add(new CipherEntry("aes256-cbc", 16, 32, "ch.ethz.ssh2.crypto.cipher.AES"));
+		ciphers.add(new CipherEntry("blowfish-cbc", 8, 16, "ch.ethz.ssh2.crypto.cipher.BlowFish"));
 
-		ciphers.addElement(new CipherEntry("aes256-cbc", 16, 32, "ch.ethz.ssh2.crypto.cipher.AES"));
-		ciphers.addElement(new CipherEntry("aes192-cbc", 16, 24, "ch.ethz.ssh2.crypto.cipher.AES"));
-		ciphers.addElement(new CipherEntry("aes128-cbc", 16, 16, "ch.ethz.ssh2.crypto.cipher.AES"));
-		ciphers.addElement(new CipherEntry("blowfish-cbc", 8, 16, "ch.ethz.ssh2.crypto.cipher.BlowFish"));
-		
-		ciphers.addElement(new CipherEntry("3des-ctr", 8, 24, "ch.ethz.ssh2.crypto.cipher.DESede"));
-		ciphers.addElement(new CipherEntry("3des-cbc", 8, 24, "ch.ethz.ssh2.crypto.cipher.DESede"));
+		ciphers.add(new CipherEntry("3des-ctr", 8, 24, "ch.ethz.ssh2.crypto.cipher.DESede"));
+		ciphers.add(new CipherEntry("3des-cbc", 8, 24, "ch.ethz.ssh2.crypto.cipher.DESede"));
 	}
 
 	public static String[] getDefaultCipherList()
 	{
-		String list[] = new String[ciphers.size()];
-		for (int i = 0; i < ciphers.size(); i++)
+		List<String> list = new ArrayList<String>(ciphers.size());
+		for (CipherEntry ce : ciphers)
 		{
-			CipherEntry ce = (CipherEntry) ciphers.elementAt(i);
-			list[i] = new String(ce.type);
+			list.add(ce.type);
 		}
-		return list;
+		return list.toArray(new String[ciphers.size()]);
 	}
 
 	public static void checkCipherList(String[] cipherCandidates)
 	{
-		for (int i = 0; i < cipherCandidates.length; i++)
-			getEntry(cipherCandidates[i]);
+		for (String cipherCandidate : cipherCandidates)
+		{
+			getEntry(cipherCandidate);
+		}
 	}
 
+	//	@SuppressWarnings("rawtypes")
 	public static BlockCipher createCipher(String type, boolean encrypt, byte[] key, byte[] iv)
 	{
 		try
 		{
 			CipherEntry ce = getEntry(type);
-			Class cc = Class.forName(ce.cipherClass);
+			Class<?> cc = Class.forName(ce.cipherClass);
 			BlockCipher bc = (BlockCipher) cc.newInstance();
 
 			if (type.endsWith("-cbc"))
@@ -84,19 +90,28 @@ public class BlockCipherFactory
 			}
 			throw new IllegalArgumentException("Cannot instantiate " + type);
 		}
-		catch (Exception e)
+		catch (ClassNotFoundException e)
 		{
-			throw new IllegalArgumentException("Cannot instantiate " + type);
+			throw new IllegalArgumentException("Cannot instantiate " + type, e);
+		}
+		catch (InstantiationException e)
+		{
+			throw new IllegalArgumentException("Cannot instantiate " + type, e);
+		}
+		catch (IllegalAccessException e)
+		{
+			throw new IllegalArgumentException("Cannot instantiate " + type, e);
 		}
 	}
 
 	private static CipherEntry getEntry(String type)
 	{
-		for (int i = 0; i < ciphers.size(); i++)
+		for (CipherEntry ce : ciphers)
 		{
-			CipherEntry ce = (CipherEntry) ciphers.elementAt(i);
 			if (ce.type.equals(type))
+			{
 				return ce;
+			}
 		}
 		throw new IllegalArgumentException("Unkown algorithm " + type);
 	}

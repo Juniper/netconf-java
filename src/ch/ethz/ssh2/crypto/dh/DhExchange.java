@@ -1,4 +1,7 @@
-
+/*
+ * Copyright (c) 2006-2013 Christian Plattner. All rights reserved.
+ * Please refer to the LICENSE.txt for licensing details.
+ */
 package ch.ethz.ssh2.crypto.dh;
 
 import java.math.BigInteger;
@@ -9,10 +12,8 @@ import ch.ethz.ssh2.log.Logger;
 import ch.ethz.ssh2.util.StringEncoder;
 
 /**
- * DhExchange.
- * 
  * @author Christian Plattner
- * @version 2.50, 03/15/10
+ * @version $Id: DhExchange.java 47 2013-07-31 23:59:52Z cleondris@gmail.com $
  */
 public class DhExchange
 {
@@ -30,10 +31,11 @@ public class DhExchange
 	BigInteger e;
 	BigInteger x;
 
-	/* Server public */
+	/* Server public and private */
 
 	BigInteger f;
-
+	BigInteger y;
+	
 	/* Shared secret */
 
 	BigInteger k;
@@ -64,7 +66,7 @@ public class DhExchange
 	{
 	}
 
-	public void init(int group, SecureRandom rnd)
+	public void clientInit(int group, SecureRandom rnd)
 	{
 		k = null;
 
@@ -75,11 +77,32 @@ public class DhExchange
 		else
 			throw new IllegalArgumentException("Unknown DH group " + group);
 
-		x = new BigInteger(p.bitLength() - 1, rnd);
-
+		while(true)
+		{
+			x = new BigInteger(p.bitLength() - 1, rnd);
+			if (x.compareTo(BigInteger.ONE) > 0)
+				break;
+		}
+		
 		e = g.modPow(x, p);
 	}
+	
+	public void serverInit(int group, SecureRandom rnd)
+	{
+		k = null;
 
+		if (group == 1)
+			p = p1;
+		else if (group == 14)
+			p = p14;
+		else
+			throw new IllegalArgumentException("Unknown DH group " + group);
+
+		y = new BigInteger(p.bitLength() - 1, rnd);
+
+		f = g.modPow(y, p);
+	}
+	
 	/**
 	 * @return Returns the e.
 	 * @throws IllegalStateException
@@ -92,6 +115,18 @@ public class DhExchange
 		return e;
 	}
 
+	/**
+	 * @return Returns the f.
+	 * @throws IllegalStateException
+	 */
+	public BigInteger getF()
+	{
+		if (f == null)
+			throw new IllegalStateException("DhDsaExchange not initialized!");
+
+		return f;
+	}
+	
 	/**
 	 * @return Returns the shared secret k.
 	 * @throws IllegalStateException
@@ -112,13 +147,26 @@ public class DhExchange
 		if (e == null)
 			throw new IllegalStateException("DhDsaExchange not initialized!");
 
-		BigInteger zero = BigInteger.valueOf(0);
-
-		if (zero.compareTo(f) >= 0 || p.compareTo(f) <= 0)
+		if (BigInteger.ZERO.compareTo(f) >= 0 || p.compareTo(f) <= 0)
 			throw new IllegalArgumentException("Invalid f specified!");
 
 		this.f = f;
 		this.k = f.modPow(x, p);
+	}
+	
+	/**
+	 * @param e
+	 */
+	public void setE(BigInteger e)
+	{
+		if (f == null)
+			throw new IllegalStateException("DhDsaExchange not initialized!");
+
+		if (BigInteger.ZERO.compareTo(e) >= 0 || p.compareTo(e) <= 0)
+			throw new IllegalArgumentException("Invalid e specified!");
+
+		this.e = e;
+		this.k = e.modPow(y, p);
 	}
 
 	public byte[] calculateH(byte[] clientversion, byte[] serverversion, byte[] clientKexPayload,
@@ -126,10 +174,10 @@ public class DhExchange
 	{
 		HashForSSH2Types hash = new HashForSSH2Types("SHA1");
 
-		if (log.isEnabled())
+		if (log.isInfoEnabled())
 		{
-			log.log(90, "Client: '" + StringEncoder.GetString(clientversion) + "'");
-			log.log(90, "Server: '" + StringEncoder.GetString(serverversion) + "'");
+			log.info("Client: '" + StringEncoder.GetString(clientversion) + "'");
+		    log.info("Server: '" + StringEncoder.GetString(serverversion) + "'");
 		}
 
 		hash.updateByteString(clientversion);

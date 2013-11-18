@@ -1,0 +1,71 @@
+K 25
+svn:wc:ra_dav:version-url
+V 75
+/svn/!svn/ver/81/tags/ganymed-ssh2-261/src/main/java/ch/ethz/ssh2/transport
+END
+ClientKexManager.java
+K 25
+svn:wc:ra_dav:version-url
+V 97
+/svn/!svn/ver/81/tags/ganymed-ssh2-261/src/main/java/ch/ethz/ssh2/transport/ClientKexManager.java
+END
+MessageHandler.java
+K 25
+svn:wc:ra_dav:version-url
+V 95
+/svn/!svn/ver/81/tags/ganymed-ssh2-261/src/main/java/ch/ethz/ssh2/transport/MessageHandler.java
+END
+KexManager.java
+K 25
+svn:wc:ra_dav:version-url
+V 91
+/svn/!svn/ver/81/tags/ganymed-ssh2-261/src/main/java/ch/ethz/ssh2/transport/KexManager.java
+END
+NegotiatedParameters.java
+K 25
+svn:wc:ra_dav:version-url
+V 101
+/svn/!svn/ver/81/tags/ganymed-ssh2-261/src/main/java/ch/ethz/ssh2/transport/NegotiatedParameters.java
+END
+TransportManager.java
+K 25
+svn:wc:ra_dav:version-url
+V 97
+/svn/!svn/ver/81/tags/ganymed-ssh2-261/src/main/java/ch/ethz/ssh2/transport/TransportManager.java
+END
+KexState.java
+K 25
+svn:wc:ra_dav:version-url
+V 89
+/svn/!svn/ver/81/tags/ganymed-ssh2-261/src/main/java/ch/ethz/ssh2/transport/KexState.java
+END
+ClientServerHello.java
+K 25
+svn:wc:ra_dav:version-url
+V 98
+/svn/!svn/ver/81/tags/ganymed-ssh2-261/src/main/java/ch/ethz/ssh2/transport/ClientServerHello.java
+END
+ServerKexManager.java
+K 25
+svn:wc:ra_dav:version-url
+V 97
+/svn/!svn/ver/81/tags/ganymed-ssh2-261/src/main/java/ch/ethz/ssh2/transport/ServerKexManager.java
+END
+KexParameters.java
+K 25
+svn:wc:ra_dav:version-url
+V 94
+/svn/!svn/ver/81/tags/ganymed-ssh2-261/src/main/java/ch/ethz/ssh2/transport/KexParameters.java
+END
+TransportConnection.java
+K 25
+svn:wc:ra_dav:version-url
+V 100
+/svn/!svn/ver/81/tags/ganymed-ssh2-261/src/main/java/ch/ethz/ssh2/transport/TransportConnection.java
+END
+NegotiateException.java
+K 25
+svn:wc:ra_dav:version-url
+V 99
+/svn/!svn/ver/81/tags/ganymed-ssh2-261/src/main/java/ch/ethz/ssh2/transport/NegotiateException.java
+END

@@ -1,4 +1,7 @@
-
+/*
+ * Copyright (c) 2006-2011 Christian Plattner. All rights reserved.
+ * Please refer to the LICENSE.txt for licensing details.
+ */
 package ch.ethz.ssh2.channel;
 
 import java.io.IOException;
@@ -8,9 +11,9 @@ import ch.ethz.ssh2.log.Logger;
 
 /**
  * RemoteAcceptThread.
- * 
+ *
  * @author Christian Plattner
- * @version 2.50, 03/15/10
+ * @version $Id: RemoteAcceptThread.java 41 2011-06-02 10:36:41Z dkocher@sudo.ch $
  */
 public class RemoteAcceptThread extends Thread
 {
@@ -28,7 +31,7 @@ public class RemoteAcceptThread extends Thread
 	Socket s;
 
 	public RemoteAcceptThread(Channel c, String remoteConnectedAddress, int remoteConnectedPort,
-			String remoteOriginatorAddress, int remoteOriginatorPort, String targetAddress, int targetPort)
+							  String remoteOriginatorAddress, int remoteOriginatorPort, String targetAddress, int targetPort)
 	{
 		this.c = c;
 		this.remoteConnectedAddress = remoteConnectedAddress;
@@ -38,11 +41,11 @@ public class RemoteAcceptThread extends Thread
 		this.targetAddress = targetAddress;
 		this.targetPort = targetPort;
 
-		if (log.isEnabled())
-			log.log(20, "RemoteAcceptThread: " + remoteConnectedAddress + "/" + remoteConnectedPort + ", R: "
-					+ remoteOriginatorAddress + "/" + remoteOriginatorPort);
+		log.debug("RemoteAcceptThread: " + remoteConnectedAddress + "/" + remoteConnectedPort + ", R: "
+				+ remoteOriginatorAddress + "/" + remoteOriginatorPort);
 	}
 
+	@Override
 	public void run()
 	{
 		try
@@ -68,7 +71,7 @@ public class RemoteAcceptThread extends Thread
 				{
 					r2l.join();
 				}
-				catch (InterruptedException e)
+				catch (InterruptedException ignored)
 				{
 				}
 			}
@@ -80,13 +83,13 @@ public class RemoteAcceptThread extends Thread
 		}
 		catch (IOException e)
 		{
-			log.log(50, "IOException in proxy code: " + e.getMessage());
+			log.warning("IOException in proxy code: " + e.getMessage());
 
 			try
 			{
 				c.cm.closeChannel(c, "IOException in proxy code (" + e.getMessage() + ")", true);
 			}
-			catch (IOException e1)
+			catch (IOException ignored)
 			{
 			}
 			try
@@ -94,7 +97,7 @@ public class RemoteAcceptThread extends Thread
 				if (s != null)
 					s.close();
 			}
-			catch (IOException e1)
+			catch (IOException ignored)
 			{
 			}
 		}
