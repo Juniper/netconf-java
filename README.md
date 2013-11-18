@@ -166,4 +166,4 @@ THE SOFTWARE.
 AUTHOR
 ======
 
-[Ankit Jain, Juniper Networks](ankitj@juniper.net)
+[Ankit Jain](http://www.linkedin.com/in/ankitj093), Juniper Networks
