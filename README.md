@@ -45,65 +45,21 @@ SYNOPSIS
 LICENSE
 =======
 
-Copyright (c) 2013, Juniper Networks, Inc.
+(BSD 2)
+
+Copyright © 2013, Juniper Networks
+
 All rights reserved.
 
-REDISTRIBUTION IN SOURCE AND BINARY FORMS ARE NOT PERMITTED.
-THE NAME OF THE COPYRIGHT OWNER MAY NOT BE USED TO ENDORSE
-OR PROMOTE PRODUCTS DERIVED FROM THIS SOFTWARE.
+Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
 
-YOU MUST ACCEPT THE TERMS OF THIS DISCLAIMER TO USE THIS SOFTWARE
+(1) Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
 
-JUNIPER IS WILLING TO MAKE THE INCLUDED SOFTWARE AVAILABLE TO YOU
-ONLY UPON THE CONDITION THAT YOU ACCEPT ALL OF THE TERMS
-CONTAINED IN THIS DISCLAIMER. PLEASE READ THE TERMS AND CONDITIONS
-OF THIS DISCLAIMER CAREFULLY.
+(2) Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
 
-THE SOFTWARE CONTAINED IN THIS FILE IS PROVIDED <93>AS IS<94>. JUNIPER MAKES
-NO WARRANTIES OF ANY KIND WHATSOEVER WITH RESPECT TO SOFTWARE.
-ALL EXPRESS OR IMPLIED CONDITIONS, REPRESENTATIONS AND WARRANTIES,
-INCLUDING ANY WARRANTY OF NON-INFRINGEMENT OR WARRANTY OF
-MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, ARE HEREBY
-DISCLAIMED AND EXCLUDED TO THE EXTENT ALLOWED BY APPLICABLE LAW.
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS “AS IS” AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-IN NO EVENT WILL JUNIPER BE LIABLE FOR ANY LOST REVENUE, PROFIT OR
-DATA, OR FOR DIRECT, SPECIAL, INDIRECT, CONSEQUENTIAL, INCIDENTAL
-OR PUNITIVE DAMAGES HOWEVER CAUSED AND REGARDLESS OF THE
-THEORY OF LIABILITY ARISING OUT OF THE USE OF OR INABILITY TO USE
-THE SOFWARE, EVEN IF JUNIPER HAS BEEN ADVISED OF THE POSSIBILITY
-OF SUCH DAMAGES.
-
-The Java implementation of the SSH-2 protocol has been
-taken from the "Ganymed SSH-2 for Java library".
-
-Their license states the following:
-
-Copyright (c) 2006 - 2010 Christian Plattner. All rights reserved.
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions
-are met:
-
-a.) Redistributions of source code must retain the above copyright
-    notice, this list of conditions and the following disclaimer.
-b.) Redistributions in binary form must reproduce the above copyright
-    notice, this list of conditions and the following disclaimer in the
-    documentation and/or other materials provided with the distribution.
-c.) Neither the name of Christian Plattner nor the names of its contributors may
-    be used to endorse or promote products derived from this software
-    without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
-LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-POSSIBILITY OF SUCH DAMAGE.
+The views and conclusions contained in the software and documentation are those of the authors and should not be interpreted as representing official policies, either expressed or implied, of Juniper Networks.
 
 This software includes work that was released under the following license:
 
