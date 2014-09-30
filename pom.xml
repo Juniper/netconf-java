@@ -8,6 +8,9 @@
     <artifactId>netconf-java</artifactId>
     <version>1.0.0</version>
     <packaging>jar</packaging>
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
     <build>
         <plugins>
             <plugin>
@@ -51,5 +54,4 @@
             </plugin>
         </plugins>
     </build>
-
 </project>
