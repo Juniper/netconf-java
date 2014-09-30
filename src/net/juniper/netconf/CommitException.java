@@ -14,9 +14,9 @@ import java.io.IOException;
  * Describes exceptions related to commit operation
  */
 public class CommitException extends IOException {
-    
-    public final String CommitErrorMsg;
- 
+
+    private final String CommitErrorMsg;
+
     CommitException(String msg) {
         super(msg);
         CommitErrorMsg = msg;

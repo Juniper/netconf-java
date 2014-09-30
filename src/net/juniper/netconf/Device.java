@@ -8,39 +8,34 @@
 
 package net.juniper.netconf;
 
-import java.util.ArrayList;
-import java.util.Iterator;
-
 import ch.ethz.ssh2.Connection;
 import ch.ethz.ssh2.Session;
 import ch.ethz.ssh2.StreamGobbler;
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
+import org.w3c.dom.Document;
+import org.xml.sax.SAXException;
+
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
-import org.w3c.dom.Document;
-import org.xml.sax.SAXException;
+import java.io.*;
+import java.util.ArrayList;
 
 /**
  * A <code>Device</code> is used to define a Netconf server.
  * <p>
  * Typically, one
  * <ol>
- * <li>creates a {@link #Device(String,String,String,String) Device} 
+ * <li>creates a {@link #Device(String,String,String,String) Device}
  * object.</li>
  * <li>perform netconf operations on the Device object.</li>
- * <li>If needed, call the method createNetconfSession() to create another 
+ * <li>If needed, call the method createNetconfSession() to create another
  * NetconfSession.</li>
- * <li>Finally, one must close the Device and release resources with the 
+ * <li>Finally, one must close the Device and release resources with the
  * {@link #close() close()} method.</li>
  * </ol>
  */
 public class Device {
-    
+
     private String hostName;
     private String userName;
     private String password;
@@ -53,10 +48,11 @@ public class Device {
     private int timeout;
     private DocumentBuilder builder;
     private NetconfSession defaultSession;
-    
+    private static final String NEWLINE = System.getProperty("line.separator");
+
     /**
      * Prepares a new <code>Device</code> object, with default client
-     * capabilities and default port 830, which can then be used to perform 
+     * capabilities and default port 830, which can then be used to perform
      * netconf operations.
      * <p>
      * @throws javax.xml.parsers.ParserConfigurationException
@@ -67,14 +63,14 @@ public class Device {
         helloRpc = defaultHelloRPC();
         port = 830;
         timeout = 5000;
-        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance() ; 
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance() ;
         builder = factory.newDocumentBuilder() ;
     }
-    
-    
+
+
     /**
      * Prepares a new <code>Device</code> object, with default client
-     * capabilities and default port 830, which can then be used to perform 
+     * capabilities and default port 830, which can then be used to perform
      * netconf operations.
      * <p>
      * @param hostName
@@ -82,7 +78,7 @@ public class Device {
      * @param userName
      *            the login username of the Netconf server.
      * @param password
-     *            the login password of the Netconf server.  
+     *            the login password of the Netconf server.
      * @param pemKeyFile
      *            path of the file containing RSA/DSA private key, in PEM
      *            format. For user-password based authentication, let this be
@@ -90,28 +86,25 @@ public class Device {
      * @throws net.juniper.netconf.NetconfException
      * @throws javax.xml.parsers.ParserConfigurationException
      */
-    public Device(String hostName, String userName, String password, 
+    public Device(String hostName, String userName, String password,
             String pemKeyFile) throws NetconfException,
             ParserConfigurationException {
         this.hostName = hostName;
         this.userName = userName;
         this.password = password;
         this.pemKeyFile = pemKeyFile;
-        if (pemKeyFile == null)
-            keyBasedAuthentication = false;
-        else
-            keyBasedAuthentication = true;
+        keyBasedAuthentication = pemKeyFile != null;
         connectionOpen = false;
         helloRpc = defaultHelloRPC();
         port = 830;
         timeout = 5000;
-        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance() ; 
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance() ;
         builder = factory.newDocumentBuilder() ;
     }
-    
+
     /**
      * Prepares a new <code>Device</code> object, with default client
-     * capabilities and user-defined port which can then be used to perform 
+     * capabilities and user-defined port which can then be used to perform
      * netconf operations.
      * <p>
      * @param hostName
@@ -119,38 +112,35 @@ public class Device {
      * @param userName
      *            the login username of the Netconf server.
      * @param password
-     *            the login password of the Netconf server. 
+     *            the login password of the Netconf server.
      * @param pemKeyFile
      *            path of the file containing RSA/DSA private key, in PEM
      *            format. For user-password based authentication, let this be
      *            null.
      * @param port
-     *            port number to establish Netconf session over SSH-2.  
+     *            port number to establish Netconf session over SSH-2.
      * @throws net.juniper.netconf.NetconfException
      * @throws javax.xml.parsers.ParserConfigurationException
      */
-    public Device(String hostName, String userName, String password, 
+    public Device(String hostName, String userName, String password,
             String pemKeyFile, int port)
             throws NetconfException, ParserConfigurationException {
         this.hostName = hostName;
         this.userName = userName;
         this.password = password;
         this.pemKeyFile = pemKeyFile;
-        if (pemKeyFile == null)
-            keyBasedAuthentication = false;
-        else
-            keyBasedAuthentication = true;
+        keyBasedAuthentication = pemKeyFile != null;
         connectionOpen = false;
         helloRpc = defaultHelloRPC();
         this.port = port;
         timeout = 5000;
-        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance() ; 
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance() ;
         builder = factory.newDocumentBuilder() ;
     }
-    
+
     /**
      * Prepares a new <code>Device</code> object, with user-defined client
-     * capabilities and default port 830 which can then be used to perform 
+     * capabilities and default port 830 which can then be used to perform
      * netconf operations.
      * <p>
      * @param hostName
@@ -158,7 +148,7 @@ public class Device {
      * @param userName
      *            the login username of the Netconf server.
      * @param password
-     *            the login password of the Netconf server.  
+     *            the login password of the Netconf server.
      * @param pemKeyFile
      *            path of the file containing RSA/DSA private key, in PEM
      *            format. For user-password based authentication, let this be
@@ -168,28 +158,25 @@ public class Device {
      * @throws net.juniper.netconf.NetconfException
      * @throws javax.xml.parsers.ParserConfigurationException
      */
-    public Device(String hostName, String userName, String password, 
+    public Device(String hostName, String userName, String password,
             String pemKeyFile, ArrayList capabilities) throws
             NetconfException, ParserConfigurationException {
         this.hostName = hostName;
         this.userName = userName;
         this.password = password;
         this.pemKeyFile = pemKeyFile;
-        if (pemKeyFile == null)
-            keyBasedAuthentication = false;
-        else
-            keyBasedAuthentication = true;
+        keyBasedAuthentication = pemKeyFile != null;
         connectionOpen = false;
         helloRpc = createHelloRPC(capabilities);
         port = 830;
         timeout = 5000;
-        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance() ; 
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance() ;
         builder = factory.newDocumentBuilder() ;
     }
-    
+
     /**
      * Prepares a new <code>Device</code> object, with user-defined client
-     * capabilities and user-defined port which can then be used to perform 
+     * capabilities and user-defined port which can then be used to perform
      * netconf operations.
      * <p>
      * @param hostName
@@ -197,70 +184,66 @@ public class Device {
      * @param userName
      *            the login username of the Netconf server.
      * @param password
-     *            the login password of the Netconf server. 
+     *            the login password of the Netconf server.
      * @param pemKeyFile
      *            path of the file containing RSA/DSA private key, in PEM
      *            format. For user-password based authentication, let this be
      *            null.
      * @param port
-     *            port number to establish Netconf session over SSH-2.    
+     *            port number to establish Netconf session over SSH-2.
      * @param capabilities
      *            the client capabilities to be advertised to Netconf server.
      * @throws net.juniper.netconf.NetconfException
      * @throws javax.xml.parsers.ParserConfigurationException
      */
-    public Device(String hostName, String userName, String password, 
+    public Device(String hostName, String userName, String password,
             String pemKeyFile, int port, ArrayList capabilities) throws
             NetconfException, ParserConfigurationException {
         this.hostName = hostName;
         this.userName = userName;
         this.password = password;
         this.pemKeyFile = pemKeyFile;
-        if (pemKeyFile == null)
-            keyBasedAuthentication = false;
-        else
-            keyBasedAuthentication = true;
+        keyBasedAuthentication = pemKeyFile != null;
         connectionOpen = false;
         helloRpc = createHelloRPC(capabilities);
         this.port = port;
         timeout = 5000;
-        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance() ; 
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance() ;
         builder = factory.newDocumentBuilder() ;
     }
-    
+
     private String defaultHelloRPC() {
         ArrayList defaultCap = getDefaultClientCapabilities();
         return createHelloRPC(defaultCap);
     }
-    
+
     private String createHelloRPC(ArrayList capabilities) {
-        StringBuffer helloRPC = new StringBuffer();
-        helloRPC.append("<hello>\n");
-        helloRPC.append("<capabilities>\n");
-        Iterator capIter = capabilities.iterator();
-        while(capIter.hasNext()) {
-            String capability = (String)capIter.next();
-            helloRPC.append("<capability>" + capability + "</capability>\n");
+        StringBuilder helloRPC = new StringBuilder();
+        helloRPC.append("<hello>").append(NEWLINE);
+        helloRPC.append("<capabilities>").append(NEWLINE);
+        for (Object capability1 : capabilities) {
+            String capability = (String) capability1;
+            helloRPC.append("<capability>").append(capability).append("</capability>").append(NEWLINE);
         }
-        helloRPC.append("</capabilities>\n");
-        helloRPC.append("</hello>\n");
-        helloRPC.append("]]>]]>\n");
+        helloRPC.append("</capabilities>").append(NEWLINE);
+        helloRPC.append("</hello>").append(NEWLINE);
+        helloRPC.append("]]>]]>").append(NEWLINE);
         return helloRPC.toString();
     }
-    
+
     /**
      * Connect to the Device, and establish a default NETCONF session.
      * @throws net.juniper.netconf.NetconfException
      */
     public void connect() throws NetconfException {
-        if (hostName == null || userName == null || (password == null && 
+        if (hostName == null || userName == null || (password == null &&
                 pemKeyFile == null)) {
             throw new NetconfException("Login parameters of Device can't be " +
                     "null.");
         }
         defaultSession = this.createNetconfSession();
     }
-    
+
     /**
      * Set the timeout value for connecting to the Device.
      * @param timeout
@@ -268,12 +251,12 @@ public class Device {
      */
     public void setTimeOut(int timeout) throws NetconfException {
         if (connectionOpen) {
-            throw new NetconfException("Can't change timeout on a live device." 
+            throw new NetconfException("Can't change timeout on a live device."
                     + "Close the device first.");
         }
         this.timeout = timeout;
     }
-    
+
     /**
      * Set the hostname of the Netconf server.
      * @param hostName
@@ -286,7 +269,7 @@ public class Device {
         }
         this.hostName = hostName;
     }
-    
+
     /**
      * Set the username of the Netconf server.
      * @param userName
@@ -299,7 +282,7 @@ public class Device {
         }
         this.userName = userName;
     }
-    
+
     /**
      * Set the password of the Netconf server.
      * @param password
@@ -312,7 +295,7 @@ public class Device {
         }
         this.password = password;
     }
-    
+
     /**
      * Set path of the RSA/DSA private key.
      * @param pemKeyFile
@@ -326,7 +309,7 @@ public class Device {
         this.pemKeyFile = pemKeyFile;
         keyBasedAuthentication = true;
     }
-    
+
     /**
      * Set the client capabilities to be advertised to the Netconf server.
      * @param capabilities
@@ -334,16 +317,16 @@ public class Device {
      */
     public void setCapabilities(ArrayList capabilities) throws NetconfException {
         if (capabilities == null) {
-            throw new IllegalArgumentException("Client capabilities cannot be " 
+            throw new IllegalArgumentException("Client capabilities cannot be "
                     + "null");
         }
         if (connectionOpen) {
-            throw new NetconfException("Can't change client capabilities on a " 
+            throw new NetconfException("Can't change client capabilities on a "
                     + "live device.Close the device first.");
         }
         helloRpc = createHelloRPC(capabilities);
     }
-    
+
     /**
      * Set the port number to establish Netconf session over SSH-2.
      * @param port
@@ -356,7 +339,7 @@ public class Device {
         }
         this.port = port;
     }
-    
+
     /**
      * Get hostname of the Netconf server.
      * @return Hostname of the device.
@@ -364,13 +347,13 @@ public class Device {
     public String gethostName() {
         return this.hostName;
     }
-    
+
     /**
      * Create a new Netconf session.
      * @return NetconfSession
      * @throws net.juniper.netconf.NetconfException
      */
-    public NetconfSession createNetconfSession() throws NetconfException {
+    NetconfSession createNetconfSession() throws NetconfException {
         Session normalSession;
         NetconfSession netconfSess;
         if (!connectionOpen) {
@@ -380,7 +363,7 @@ public class Device {
             } catch(Exception e) {
                 throw new NetconfException(e.getMessage());
             }
-            boolean isAuthenticated = true;
+            boolean isAuthenticated;
             try {
                 if (keyBasedAuthentication) {
                     File keyFile = new File(pemKeyFile);
@@ -391,7 +374,7 @@ public class Device {
                             (userName, password);
                 }
             } catch (IOException e) {
-                throw new NetconfException("Authentication failed:" + 
+                throw new NetconfException("Authentication failed:" +
                         e.getMessage());
             }
             if (!isAuthenticated)
@@ -403,12 +386,12 @@ public class Device {
             normalSession.startSubSystem("netconf");
             netconfSess = new NetconfSession(normalSession, helloRpc, builder);
         } catch (IOException e) {
-            throw new NetconfException("Failed to create Netconf session:" + 
+            throw new NetconfException("Failed to create Netconf session:" +
                     e.getMessage());
         }
         return netconfSess;
     }
-    
+
     /**
      * Reboot the device.
      * @return RPC reply sent by Netconf server.
@@ -422,10 +405,10 @@ public class Device {
         }
         return this.defaultSession.reboot();
     }
-    
+
     /**
-     * Close the connection to the Netconf server. All associated Netconf 
-     * sessions will be closed, too. Can be called at any time. Don't forget to 
+     * Close the connection to the Netconf server. All associated Netconf
+     * sessions will be closed, too. Can be called at any time. Don't forget to
      * call this once you don't need the device anymore.
      */
     public void close() {
@@ -435,8 +418,8 @@ public class Device {
         NetconfConn.close();
         connectionOpen = false;
     }
-    
-    /** 
+
+    /**
      * Execute a command in shell mode.
      * @param command
      *          The command to be executed in shell mode.
@@ -449,14 +432,14 @@ public class Device {
         }
         Session session = NetconfConn.openSession();
         session.execCommand(command);
-        InputStream stdout; 
-        BufferedReader bufferReader; 
+        InputStream stdout;
+        BufferedReader bufferReader;
         stdout = new StreamGobbler(session.getStdout());
         bufferReader = new BufferedReader(new InputStreamReader(stdout));
-       
+
        String reply = "";
        while (true) {
-            String line = "";
+            String line;
             try {
                 line = bufferReader.readLine();
             } catch ( Exception e) {
@@ -468,36 +451,36 @@ public class Device {
         }
         return reply;
     }
-    
-    /** 
+
+    /**
      * Execute a command in shell mode.
      * @param command
      *          The command to be executed in shell mode.
-     * @return Result of the command execution, as a BufferedReader. This is 
+     * @return Result of the command execution, as a BufferedReader. This is
      *         useful if we want continuous stream of output, rather than wait
      *         for whole output till command execution completes.
      * @throws java.io.IOException
      */
-    public BufferedReader runShellCommandRunning(String command) 
+    public BufferedReader runShellCommandRunning(String command)
             throws IOException {
         if (!connectionOpen) {
             throw new IOException("Could not find open connection");
         }
         Session session = NetconfConn.openSession();
         session.execCommand(command);
-        InputStream stdout; 
-        BufferedReader bufferReader; 
+        InputStream stdout;
+        BufferedReader bufferReader;
         stdout = new StreamGobbler(session.getStdout());
         bufferReader = new BufferedReader(new InputStreamReader(stdout));
         return bufferReader;
     }
-    
+
     /**
-     * Get the client capabilities that are advertised to the Netconf server 
+     * Get the client capabilities that are advertised to the Netconf server
      * by default.
      * @return Arraylist of default client capabilities.
      */
-    public ArrayList getDefaultClientCapabilities() {
+    ArrayList getDefaultClientCapabilities() {
         ArrayList defaultCap = new ArrayList();
         defaultCap.add("urn:ietf:params:xml:ns:netconf:base:1.0");
         defaultCap.add("urn:ietf:params:xml:ns:netconf:base:1.0#candidate");
@@ -506,14 +489,14 @@ public class Device {
         defaultCap.add("urn:ietf:params:xml:ns:netconf:base:1.0#url?protocol=http,ftp,file");
         return defaultCap;
     }
-    
+
     /**
-     * Send an RPC(as String object) over the default Netconf session and get 
+     * Send an RPC(as String object) over the default Netconf session and get
      * the response as an XML object.
      * <p>
      * @param rpcContent
-     *          RPC content to be sent. For example, to send an rpc 
-     *          &lt;rpc&gt;&lt;get-chassis-inventory/&gt;&lt;/rpc&gt;, the 
+     *          RPC content to be sent. For example, to send an rpc
+     *          &lt;rpc&gt;&lt;get-chassis-inventory/&gt;&lt;/rpc&gt;, the
      *          String to be passed can be
      *                 "&lt;get-chassis-inventory/&gt;" OR
      *                 "get-chassis-inventory" OR
@@ -529,9 +512,9 @@ public class Device {
         }
         return this.defaultSession.executeRPC(rpcContent);
     }
-    
+
     /**
-     * Send an RPC(as XML object) over the Netconf session and get the response 
+     * Send an RPC(as XML object) over the Netconf session and get the response
      * as an XML object.
      * <p>
      * @param rpc
@@ -548,9 +531,9 @@ public class Device {
         }
         return this.defaultSession.executeRPC(rpc);
     }
-    
+
     /**
-     * Send an RPC(as Document object) over the Netconf session and get the 
+     * Send an RPC(as Document object) over the Netconf session and get the
      * response as an XML object.
      * <p>
      * @param rpcDoc
@@ -566,25 +549,25 @@ public class Device {
         }
         return this.defaultSession.executeRPC(rpcDoc);
     }
-    
+
     /**
-     * Send an RPC(as String object) over the default Netconf session and get 
+     * Send an RPC(as String object) over the default Netconf session and get
      * the response as a BufferedReader.
      * <p>
      * @param rpcContent
-     *          RPC content to be sent. For example, to send an rpc 
-     *          &lt;rpc&gt;&lt;get-chassis-inventory/&gt;&lt;/rpc&gt;, the 
+     *          RPC content to be sent. For example, to send an rpc
+     *          &lt;rpc&gt;&lt;get-chassis-inventory/&gt;&lt;/rpc&gt;, the
      *          String to be passed can be
      *                 "&lt;get-chassis-inventory/&gt;" OR
      *                 "get-chassis-inventory" OR
      *                 "&lt;rpc&gt;&lt;get-chassis-inventory/&gt;&lt;/rpc&gt;"
-     * @return RPC reply sent by Netconf server as a BufferedReader. This is 
+     * @return RPC reply sent by Netconf server as a BufferedReader. This is
      *         useful if we want continuous stream of output, rather than wait
      *         for whole output till rpc execution completes.
      * @throws org.xml.sax.SAXException
      * @throws java.io.IOException
      */
-    public BufferedReader executeRPCRunning(String rpcContent) 
+    public BufferedReader executeRPCRunning(String rpcContent)
             throws SAXException, IOException {
         if (defaultSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
@@ -592,21 +575,21 @@ public class Device {
         }
         return this.defaultSession.executeRPCRunning(rpcContent);
     }
-    
+
     /**
-     * Send an RPC(as XML object) over the Netconf session and get the response 
+     * Send an RPC(as XML object) over the Netconf session and get the response
      * as a BufferedReader.
      * <p>
      * @param rpc
      *          RPC to be sent. Use the XMLBuilder to create RPC as an
      *          XML object.
-     * @return RPC reply sent by Netconf server as a BufferedReader. This is 
+     * @return RPC reply sent by Netconf server as a BufferedReader. This is
      *         useful if we want continuous stream of output, rather than wait
      *         for whole output till command execution completes.
      * @throws org.xml.sax.SAXException
      * @throws java.io.IOException
      */
-    public BufferedReader executeRPCRunning(XML rpc) throws SAXException, 
+    public BufferedReader executeRPCRunning(XML rpc) throws SAXException,
             IOException {
         if (defaultSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
@@ -614,20 +597,20 @@ public class Device {
         }
         return this.defaultSession.executeRPCRunning(rpc);
     }
-    
+
     /**
-     * Send an RPC(as Document object) over the Netconf session and get the 
+     * Send an RPC(as Document object) over the Netconf session and get the
      * response as a BufferedReader.
      * <p>
      * @param rpcDoc
      *          RPC content to be sent, as a org.w3c.dom.Document object.
-     * @return RPC reply sent by Netconf server as a BufferedReader. This is 
+     * @return RPC reply sent by Netconf server as a BufferedReader. This is
      *         useful if we want continuous stream of output, rather than wait
      *         for whole output till command execution completes.
      * @throws org.xml.sax.SAXException
      * @throws java.io.IOException
      */
-    public BufferedReader executeRPCRunning(Document rpcDoc) 
+    public BufferedReader executeRPCRunning(Document rpcDoc)
             throws SAXException, IOException {
         if (defaultSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
@@ -635,7 +618,7 @@ public class Device {
         }
         return this.defaultSession.executeRPCRunning(rpcDoc);
     }
-    
+
     /**
      * Get the session ID of the Netconf session.
      * @return Session ID
@@ -647,7 +630,7 @@ public class Device {
         }
         return this.defaultSession.getSessionId();
     }
-    
+
     /**
      * Check if the last RPC reply returned from Netconf server has any error.
      * @return true if any errors are found in last RPC reply.
@@ -659,7 +642,7 @@ public class Device {
         }
         return this.defaultSession.hasError();
     }
-    
+
     /**
      * Check if the last RPC reply returned from Netconf server has any warning.
      * @return true if any errors are found in last RPC reply.
@@ -671,9 +654,9 @@ public class Device {
         }
         return this.defaultSession.hasWarning();
     }
-    
+
     /**
-     * Check if the last RPC reply returned from Netconf server, contains 
+     * Check if the last RPC reply returned from Netconf server, contains
      * &lt;ok/&gt; tag.
      * @return true if &lt;ok/&gt; tag is found in last RPC reply.
      */
@@ -684,12 +667,12 @@ public class Device {
         }
         return this.defaultSession.isOK();
     }
-    
+
     /**
      * Locks the candidate configuration.
      * @return true if successful.
      * @throws java.io.IOException
-     * @throws org.xml.sax.SAXException 
+     * @throws org.xml.sax.SAXException
      */
     public boolean lockConfig() throws IOException, SAXException {
         if (defaultSession == null) {
@@ -698,12 +681,12 @@ public class Device {
         }
         return this.defaultSession.lockConfig();
     }
-    
+
     /**
      * Unlocks the candidate configuration.
      * @return true if successful.
      * @throws java.io.IOException
-     * @throws org.xml.sax.SAXException  
+     * @throws org.xml.sax.SAXException
      */
     public boolean unlockConfig() throws IOException, SAXException {
         if (defaultSession == null) {
@@ -712,31 +695,31 @@ public class Device {
         }
         return this.defaultSession.unlockConfig();
     }
-    
+
     /**
      * Loads the candidate configuration, Configuration should be in XML format.
      * @param configuration
      *            Configuration,in XML format, to be loaded. For example,
      * "&lt;configuration&gt;&lt;system&gt;&lt;services&gt;&lt;ftp/&gt;
      * &lt;services/&gt;&lt;/system&gt;&lt;/configuration/&gt;"
-     * will load 'ftp' under the 'systems services' hierarchy.  
+     * will load 'ftp' under the 'systems services' hierarchy.
      * @param loadType
      *           You can choose "merge" or "replace" as the loadType.
      * @throws net.juniper.netconf.LoadException
      * @throws java.io.IOException
-     * @throws org.xml.sax.SAXException 
+     * @throws org.xml.sax.SAXException
      */
-    public void loadXMLConfiguration(String configuration, String loadType) 
-            throws LoadException, IOException, SAXException {
+    public void loadXMLConfiguration(String configuration, String loadType)
+            throws IOException, SAXException {
         if (defaultSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
                     "establish a connection first.");
         }
         this.defaultSession.loadXMLConfiguration(configuration, loadType);
     }
-    
+
     /**
-     * Loads the candidate configuration, Configuration should be in text/tree 
+     * Loads the candidate configuration, Configuration should be in text/tree
      * format.
      * @param configuration
      *            Configuration,in text/tree format, to be loaded. For example,
@@ -745,36 +728,36 @@ public class Device {
      *         ftp;
      *     }
      *   }"
-     * will load 'ftp' under the 'systems services' hierarchy.  
+     * will load 'ftp' under the 'systems services' hierarchy.
      * @param loadType
      *           You can choose "merge" or "replace" as the loadType.
      * @throws net.juniper.netconf.LoadException
      * @throws java.io.IOException
-     * @throws org.xml.sax.SAXException 
+     * @throws org.xml.sax.SAXException
      */
-    public void loadTextConfiguration(String configuration, String loadType) 
-            throws LoadException, IOException, SAXException {
+    public void loadTextConfiguration(String configuration, String loadType)
+            throws IOException, SAXException {
         if (defaultSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
                     "establish a connection first.");
         }
         this.defaultSession.loadTextConfiguration(configuration, loadType);
     }
-    
+
     /**
-     * Loads the candidate configuration, Configuration should be in set 
+     * Loads the candidate configuration, Configuration should be in set
      * format.
      * NOTE: This method is applicable only for JUNOS release 11.4 and above.
      * @param configuration
      *            Configuration,in set format, to be loaded. For example,
      * "set system services ftp"
-     * will load 'ftp' under the 'systems services' hierarchy. 
+     * will load 'ftp' under the 'systems services' hierarchy.
      * To load multiple set statements, separate them by '\n' character.
      * @throws net.juniper.netconf.LoadException
      * @throws java.io.IOException
-     * @throws org.xml.sax.SAXException 
+     * @throws org.xml.sax.SAXException
      */
-    public void loadSetConfiguration(String configuration) throws LoadException,
+    public void loadSetConfiguration(String configuration) throws
             IOException,
             SAXException {
         if (defaultSession == null) {
@@ -783,94 +766,94 @@ public class Device {
         }
         this.defaultSession.loadSetConfiguration(configuration);
     }
-    
+
     /**
-     * Loads the candidate configuration from file, 
+     * Loads the candidate configuration from file,
      * configuration should be in XML format.
      * @param configFile
      *            Path name of file containing configuration,in xml format,
-     *            to be loaded. 
+     *            to be loaded.
      * @param loadType
      *           You can choose "merge" or "replace" as the loadType.
      * @throws net.juniper.netconf.LoadException
      * @throws java.io.IOException
-     * @throws org.xml.sax.SAXException 
+     * @throws org.xml.sax.SAXException
      */
-    public void loadXMLFile(String configFile, String loadType) 
-            throws LoadException, IOException, SAXException {
+    public void loadXMLFile(String configFile, String loadType)
+            throws IOException, SAXException {
         if (defaultSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
                     "establish a connection first.");
         }
         this.defaultSession.loadXMLFile(configFile, loadType);
     }
-    
+
     /**
-     * Loads the candidate configuration from file, 
+     * Loads the candidate configuration from file,
      * configuration should be in text/tree format.
      * @param configFile
      *            Path name of file containing configuration,in xml format,
-     *            to be loaded. 
+     *            to be loaded.
      * @param loadType
      *           You can choose "merge" or "replace" as the loadType.
      * @throws net.juniper.netconf.LoadException
      * @throws java.io.IOException
-     * @throws org.xml.sax.SAXException 
+     * @throws org.xml.sax.SAXException
      */
-    public void loadTextFile(String configFile, String loadType) 
-            throws LoadException, IOException, SAXException {
+    public void loadTextFile(String configFile, String loadType)
+            throws IOException, SAXException {
         if (defaultSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
                     "establish a connection first.");
         }
         this.defaultSession.loadTextFile(configFile, loadType);
     }
-    
+
     /**
      * Loads the candidate configuration from file,
      * configuration should be in set format.
      * NOTE: This method is applicable only for JUNOS release 11.4 and above.
      * @param configFile
-     *            Path name of file containing configuration,in set format, 
+     *            Path name of file containing configuration,in set format,
      *            to be loaded.
      * @throws net.juniper.netconf.LoadException
      * @throws java.io.IOException
-     * @throws org.xml.sax.SAXException 
+     * @throws org.xml.sax.SAXException
      */
-    public void loadSetFile(String configFile) throws 
-            IOException, LoadException, SAXException {
+    public void loadSetFile(String configFile) throws
+            IOException, SAXException {
         if (defaultSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
                     "establish a connection first.");
         }
         this.defaultSession.loadSetFile(configFile);
     }
-    
+
     /**
      * Commit the candidate configuration.
      * @throws net.juniper.netconf.CommitException
      * @throws java.io.IOException
-     * @throws org.xml.sax.SAXException 
+     * @throws org.xml.sax.SAXException
      */
-    public void commit() throws CommitException, IOException, SAXException {
+    public void commit() throws IOException, SAXException {
         if (defaultSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
                     "establish a connection first.");
         }
         this.defaultSession.commit();
     }
-    
+
     /**
-     * Commit the candidate configuration, temporarily. This is equivalent of 
+     * Commit the candidate configuration, temporarily. This is equivalent of
      * 'commit confirm'
      * @param seconds
-     *           Time in seconds, after which the previous active configuration 
+     *           Time in seconds, after which the previous active configuration
      *           is reverted back to.
      * @throws net.juniper.netconf.CommitException
      * @throws java.io.IOException
-     * @throws org.xml.sax.SAXException 
-     */ 
-    public void commitConfirm(long seconds) throws CommitException, IOException,
+     * @throws org.xml.sax.SAXException
+     */
+    public void commitConfirm(long seconds) throws IOException,
             SAXException {
         if (defaultSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
@@ -878,9 +861,9 @@ public class Device {
         }
         this.defaultSession.commitConfirm(seconds);
     }
-    
+
     /**
-     * Loads and commits the candidate configuration, Configuration can be in 
+     * Loads and commits the candidate configuration, Configuration can be in
      * text/xml format.
      * @param configFile
      *            Path name of file containing configuration,in text/xml format,
@@ -890,38 +873,38 @@ public class Device {
      *         ftp;
      *     }
      *   }"
-     * will load 'ftp' under the 'systems services' hierarchy.  
+     * will load 'ftp' under the 'systems services' hierarchy.
      * OR
      * "&lt;configuration&gt;&lt;system&gt;&lt;services&gt;&lt;ftp/&gt;&lt;
      * services/&gt;&lt;/system&gt;&lt;/configuration/&gt;"
-     * will load 'ftp' under the 'systems services' hierarchy.  
+     * will load 'ftp' under the 'systems services' hierarchy.
      * @param loadType
      *           You can choose "merge" or "replace" as the loadType.
-     * @throws net.juniper.netconf.LoadException 
+     * @throws net.juniper.netconf.LoadException
      * @throws net.juniper.netconf.CommitException
      * @throws java.io.IOException
-     * @throws org.xml.sax.SAXException 
+     * @throws org.xml.sax.SAXException
      */
-    public void commitThisConfiguration(String configFile, String loadType) 
-            throws LoadException, CommitException, IOException, SAXException {
+    public void commitThisConfiguration(String configFile, String loadType)
+            throws IOException, SAXException {
         if (defaultSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
                     "establish a connection first.");
         }
         this.defaultSession.commitThisConfiguration(configFile, loadType);
     }
-    
+
     /**
      * Retrieve the candidate configuration, or part of the configuration.
      * @param configTree
      *           configuration hierarchy to be retrieved as the argument.
-     * For example, to get the whole configuration, argument should be 
+     * For example, to get the whole configuration, argument should be
      * &lt;configuration&gt;&lt;/configuration&gt;
      * @return configuration data as XML object.
      * @throws org.xml.sax.SAXException
      * @throws java.io.IOException
      */
-    public XML getCandidateConfig(String configTree) throws SAXException, 
+    public XML getCandidateConfig(String configTree) throws SAXException,
             IOException {
         if (defaultSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
@@ -929,18 +912,18 @@ public class Device {
         }
         return this.defaultSession.getCandidateConfig(configTree);
     }
-    
+
     /**
      * Retrieve the running configuration, or part of the configuration.
      * @param configTree
      *           configuration hierarchy to be retrieved as the argument.
-     * For example, to get the whole configuration, argument should be 
+     * For example, to get the whole configuration, argument should be
      * &lt;configuration&gt;&lt;/configuration&gt;
      * @return configuration data as XML object.
      * @throws org.xml.sax.SAXException
      * @throws java.io.IOException
      */
-    public XML getRunningConfig(String configTree) throws SAXException, 
+    public XML getRunningConfig(String configTree) throws SAXException,
             IOException {
         if (defaultSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
@@ -948,7 +931,7 @@ public class Device {
         }
         return this.defaultSession.getRunningConfig(configTree);
     }
-    
+
     /**
      * Retrieve the whole candidate configuration.
      * @return configuration data as XML object.
@@ -962,7 +945,7 @@ public class Device {
         }
         return this.defaultSession.getCandidateConfig();
     }
-    
+
     /**
      * Retrieve the whole running configuration.
      * @return configuration data as XML object.
@@ -976,12 +959,12 @@ public class Device {
         }
         return this.defaultSession.getRunningConfig();
     }
-       
+
     /**
      * Validate the candidate configuration.
      * @return true if validation successful.
      * @throws java.io.IOException
-     * @throws org.xml.sax.SAXException 
+     * @throws org.xml.sax.SAXException
      */
     public boolean validate() throws IOException, SAXException  {
          if (defaultSession == null) {
@@ -990,15 +973,15 @@ public class Device {
         }
         return this.defaultSession.validate();
     }
-    
+
     /**
      * Run a cli command, and get the corresponding output.
-     * NOTE: The text output is supported for JUNOS 11.4 and later. 
+     * NOTE: The text output is supported for JUNOS 11.4 and later.
      * @param command
      *       the cli command to be executed.
      * @return result of the command.
      * @throws java.io.IOException
-     * @throws org.xml.sax.SAXException 
+     * @throws org.xml.sax.SAXException
      */
     public String runCliCommand(String command) throws IOException, SAXException {
          if (defaultSession == null) {
@@ -1007,18 +990,18 @@ public class Device {
         }
         return this.defaultSession.runCliCommand(command);
     }
-    
+
      /**
      * Run a cli command.
      * @param command
      *       the cli command to be executed.
-     * @return result of the command, as a Bufferedreader. This is 
+     * @return result of the command, as a Bufferedreader. This is
      *         useful if we want continuous stream of output, rather than wait
      *         for whole output till command execution completes.
      * @throws org.xml.sax.SAXException
      * @throws java.io.IOException
      */
-    public BufferedReader runCliCommandRunning(String command) 
+    public BufferedReader runCliCommandRunning(String command)
             throws  SAXException, IOException {
          if (defaultSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
@@ -1026,9 +1009,9 @@ public class Device {
         }
         return this.defaultSession.runCliCommandRunning(command);
     }
-    
+
     /**
-     * This method should be called for load operations to happen in 'private' 
+     * This method should be called for load operations to happen in 'private'
      * mode.
      * @param mode
      *       Mode in which to open the configuration.
@@ -1042,7 +1025,7 @@ public class Device {
         }
         defaultSession.openConfiguration(mode);
     }
-    
+
     /**
      * This method should be called to close a private session, in case its
      * started.
@@ -1055,7 +1038,7 @@ public class Device {
         }
         defaultSession.closeConfiguration();
     }
-    
+
     /**
      * Returns the last RPC reply sent by Netconf server.
      * @return Last RPC reply, as a string
@@ -1063,6 +1046,6 @@ public class Device {
     public String getLastRPCReply() {
         return this.defaultSession.getLastRPCReply();
     }
-    
+
 }
 

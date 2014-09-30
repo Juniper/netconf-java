@@ -15,7 +15,7 @@ import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 
 /**
- * An <code>XMLBuilder</code> is used to create an XML object.This is useful to 
+ * An <code>XMLBuilder</code> is used to create an XML object.This is useful to
  * create XML RPC's and configurations.
  * <p>
  * As an example, one
@@ -26,25 +26,24 @@ import org.w3c.dom.Element;
  * </ol>
  */
 public class XMLBuilder {
-    
-    DOMImplementation impl;
-    DocumentBuilder builder;
-    
+
+    private DOMImplementation impl;
+
     /**
      * Prepares a new <code>XMLBuilder<code/> object.
      * @throws javax.xml.parsers.ParserConfigurationException
      */
     public XMLBuilder() throws ParserConfigurationException {
-        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance() ; 
-        builder = factory.newDocumentBuilder() ;
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance() ;
+        DocumentBuilder builder = factory.newDocumentBuilder();
         impl = builder.getDOMImplementation();
     }
-    
+
     /**
      * Create a new configuration(single-level hiearchy) as an XML object.
      * <p>
      * @param elementLevelOne
-     *          The element at the top-most hierarchy. For example, to create a 
+     *          The element at the top-most hierarchy. For example, to create a
      *          configuration,
      *          "&lt;configuration&gt;&lt;system/&gt;&lt;/configuration&gt;" the
      *          String to be passed is "system".
@@ -57,12 +56,12 @@ public class XMLBuilder {
         rootElement.appendChild(elementOne);
         return new XML(elementOne);
     }
-    
+
     /**
      * Create a new configuration(two-level hiearchy) as an XML object.
      * <p>
      * @param elementLevelOne
-     *          The element at the top-most hierarchy. 
+     *          The element at the top-most hierarchy.
      * @param elementLevelTwo
      *          The element at level-2 hierarchy.
      * @return XML object.
@@ -76,12 +75,12 @@ public class XMLBuilder {
         rootElement.appendChild(elementOne);
         return new XML(elementTwo);
     }
-    
+
     /**
      * Create a new configuration(three-level hiearchy) as an XML object.
      * <p>
      * @param elementLevelOne
-     *          The element at the top-most hierarchy. 
+     *          The element at the top-most hierarchy.
      * @param elementLevelTwo
      *          The element at level-2 hierarchy.
      * @param elementLevelThree
@@ -100,12 +99,12 @@ public class XMLBuilder {
         rootElement.appendChild(elementOne);
         return new XML(elementThree);
     }
-    
+
     /**
      * Create a new configuration(four-level hiearchy) as an XML object.
      * <p>
      * @param elementLevelOne
-     *          The element at the top-most hierarchy. 
+     *          The element at the top-most hierarchy.
      * @param elementLevelTwo
      *          The element at level-2 hierarchy.
      * @param elementLevelThree
@@ -128,12 +127,12 @@ public class XMLBuilder {
         rootElement.appendChild(elementOne);
         return new XML(elementFour);
     }
-    
+
     /**
      * Create a new configuration as an XML object.
      * <p>
      * @param elementList
-     *          The list of elements to be included in the XML. For example, 
+     *          The list of elements to be included in the XML. For example,
      *          to create a configuration,
      *          "&lt;configuration&gt;&lt;system&gt;&lt;services&gt;&lt;ftp/&gt;
      *          &lt;/services&gt;&lt;/system&gt;&lt;/configuration&gt;" the
@@ -156,12 +155,12 @@ public class XMLBuilder {
         rootElement.appendChild(last);
         return new XML(elementLevelLast);
     }
-        
+
     /**
      * Create a new RPC(single-level hiearchy) as an XML object.
      * <p>
      * @param elementLevelOne
-     *          The element at the top-most hierarchy. 
+     *          The element at the top-most hierarchy.
      * @return XML object.
      */
     public XML createNewRPC(String elementLevelOne) {
@@ -171,12 +170,12 @@ public class XMLBuilder {
         rootElement.appendChild(elementOne);
         return new XML(elementOne);
     }
-    
+
     /**
      * Create a new RPC(two-level hiearchy) as an XML object.
      * <p>
      * @param elementLevelOne
-     *          The element at the top-most hierarchy. 
+     *          The element at the top-most hierarchy.
      * @param elementLevelTwo
      *          The element at level-2 hierarchy.
      * @return XML object.
@@ -190,12 +189,12 @@ public class XMLBuilder {
         rootElement.appendChild(elementOne);
         return new XML(elementTwo);
     }
-    
+
     /**
      * Create a new RPC(three-level hiearchy) as an XML object.
      * <p>
      * @param elementLevelOne
-     *          The element at the top-most hierarchy. 
+     *          The element at the top-most hierarchy.
      * @param elementLevelTwo
      *          The element at level-2 hierarchy.
      * @param elementLevelThree
@@ -214,12 +213,12 @@ public class XMLBuilder {
         rootElement.appendChild(elementOne);
         return new XML(elementThree);
     }
-    
+
     /**
      * Create a new RPC(four-level hiearchy) as an XML object.
      * <p>
      * @param elementLevelOne
-     *          The element at the top-most hierarchy. 
+     *          The element at the top-most hierarchy.
      * @param elementLevelTwo
      *          The element at level-2 hierarchy.
      * @param elementLevelThree
@@ -242,7 +241,7 @@ public class XMLBuilder {
         rootElement.appendChild(elementOne);
         return new XML(elementFour);
     }
-    
+
     /**
      * Create a new RPC as an XML object.
      * <p>
@@ -269,12 +268,12 @@ public class XMLBuilder {
         rootElement.appendChild(last);
         return new XML(elementLevelLast);
     }
-    
+
     /**
      * Create a new xml(one-level hiearchy) as an XML object.
      * <p>
      * @param elementLevelOne
-     *          The element at the top-most hierarchy. 
+     *          The element at the top-most hierarchy.
      * @return XML object.
      */
     public XML createNewXML(String elementLevelOne) {
@@ -282,12 +281,12 @@ public class XMLBuilder {
         Element rootElement = doc.getDocumentElement();
         return new XML(rootElement);
     }
-    
+
     /**
      * Create a new xml(two-level hiearchy) as an XML object.
      * <p>
      * @param elementLevelOne
-     *          The element at the top-most hierarchy. 
+     *          The element at the top-most hierarchy.
      * @param elementLevelTwo
      *          The element at level-2 hierarchy.
      * @return XML object.
@@ -299,12 +298,12 @@ public class XMLBuilder {
         rootElement.appendChild(elementTwo);
         return new XML(elementTwo);
     }
-    
+
     /**
      * Create a new xml(three-level hiearchy) as an XML object.
      * <p>
      * @param elementLevelOne
-     *          The element at the top-most hierarchy. 
+     *          The element at the top-most hierarchy.
      * @param elementLevelTwo
      *          The element at level-2 hierarchy.
      * @param elementLevelThree
@@ -321,12 +320,12 @@ public class XMLBuilder {
         rootElement.appendChild(elementTwo);
         return new XML(elementThree);
     }
-    
+
     /**
      * Create a new xml(four-level hiearchy) as an XML object.
      * <p>
      * @param elementLevelOne
-     *          The element at the top-most hierarchy. 
+     *          The element at the top-most hierarchy.
      * @param elementLevelTwo
      *          The element at level-2 hierarchy.
      * @param elementLevelThree
@@ -347,7 +346,7 @@ public class XMLBuilder {
         rootElement.appendChild(elementTwo);
         return new XML(elementFour);
     }
-    
+
     /**
      * Create a new xml as an XML object.
      * <p>

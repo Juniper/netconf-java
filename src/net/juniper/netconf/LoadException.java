@@ -10,13 +10,13 @@ package net.juniper.netconf;
 
 import java.io.IOException;
 
-/** 
+/**
  * Describes exceptions related to load operation
  */
 public class LoadException extends IOException {
-    
-    public final String LoadErrorMsg;
- 
+
+    private final String LoadErrorMsg;
+
     LoadException(String msg) {
         super(msg);
         LoadErrorMsg = msg;
