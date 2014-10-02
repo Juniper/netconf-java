@@ -16,7 +16,7 @@ public class XMLBuilderTest {
     }
 
     @Test
-    public void testCreateNewFtpConfig() throws Exception {
+    public void testCreateNewFtpConfigWithFormatting() throws Exception {
         XML ftpConfig = builder.createNewConfig("system", "services", "ftp");
         assertNotNull(ftpConfig);
         String expectedOutput = "<configuration>" + NEWLINE +
@@ -31,7 +31,7 @@ public class XMLBuilderTest {
 
 
     @Test
-    public void testCreateNewTrapGroupConfig() throws Exception {
+    public void testCreateNewTrapGroupConfigWithoutFormatting() throws Exception {
         XML trapGroupConfig = builder.createNewConfig("snmp");
         XML trapGroup = trapGroupConfig.addPath("trap-group");
         trapGroup.append("group-name", "new-trap-receiver");
@@ -43,22 +43,8 @@ public class XMLBuilderTest {
         targets.append("name", "10.0.0.1");
 
 
-        String expectedOutput = "<configuration>" + NEWLINE +
-                "    <snmp>" + NEWLINE +
-                "        <trap-group>" + NEWLINE +
-                "            <group-name>new-trap-receiver</group-name>" + NEWLINE +
-                "            <categories>" + NEWLINE +
-                "                <chassis/>" + NEWLINE +
-                "                <link/>" + NEWLINE +
-                "            </categories>" + NEWLINE +
-                "            <destination-port>162</destination-port>" + NEWLINE +
-                "            <targets>" + NEWLINE +
-                "                <name>10.0.0.1</name>" + NEWLINE +
-                "            </targets>" + NEWLINE +
-                "        </trap-group>" + NEWLINE +
-                "    </snmp>" + NEWLINE +
-                "</configuration>";
-        assertEquals(expectedOutput, trapGroupConfig.toString().trim());
+        String expectedOutput = "<configuration><snmp><trap-group><group-name>new-trap-receiver</group-name><categories><chassis/><link/></categories><destination-port>162</destination-port><targets><name>10.0.0.1</name></targets></trap-group></snmp></configuration>";
+        assertEquals(expectedOutput, trapGroupConfig.toString().replaceAll(">\\s+<", "><").trim());
     }
 
 }
