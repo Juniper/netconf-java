@@ -323,13 +323,13 @@ public class XML {
      *          "name~FPC 0 CPU","temperature"}
      * @return The text value of the element.
      */
-    public String findValue(List list) {
+    public String findValue(List<String> list) {
         Element root = ownerDoc.getDocumentElement();
         Element nextElement = root;
         boolean nextElementFound = false;
         for (int k=0; k<list.size(); k++) {
             nextElementFound = false;
-            String nextElementName = (String)list.get(k);
+            String nextElementName = list.get(k);
             if (nextElementName.indexOf("~")<0){
                 try {
                     NodeList nextElementList = nextElement.
@@ -349,7 +349,7 @@ public class XML {
                      */ 
                     String n2nString = null;
                     if (k<list.size()-1)
-                        n2nString = (String)list.get(k+1);
+                        n2nString = list.get(k+1);
                     if (n2nString != null && n2nString.indexOf("~") >= 0) {
                         /* Since the n2n element is a filter based on text 
                          * value( decided by '~')
@@ -413,14 +413,14 @@ public class XML {
      *          "name~FPC 0 CPU"}
      * @return The list containing Nodes as org.w3c.dom.Node objects.
      */
-    public List findNodes(List list) {
+    public List<Node> findNodes(List<String> list) {
         Element root = ownerDoc.getDocumentElement();
         Element nextElement = root;
         boolean nextElementFound = false;
-        List finalList = new ArrayList();
+        List<Node> finalList = new ArrayList();
         for (int k=0; k<list.size(); k++) {
             nextElementFound = false;
-            String nextElementName = (String)list.get(k);
+            String nextElementName = list.get(k);
             if (nextElementName.indexOf("~")<0) {
                 try {
                     NodeList nextElementList = nextElement.
@@ -441,7 +441,7 @@ public class XML {
                      */ 
                     String n2nString = null;
                     if (k<list.size()-1)
-                        n2nString = (String)list.get(k+1);
+                        n2nString = list.get(k+1);
                     if (n2nString != null && n2nString.indexOf("~") >= 0) {
                         /* Since the n2n element is a filter based on text value
                          * ( decided by '~')
@@ -484,10 +484,11 @@ public class XML {
             return null;
         }
         String nodeName = nextElement.getNodeName();
-        String listLastEntry = (String)list.get(list.size()-1);
+        String listLastEntry = list.get(list.size()-1);
         if (listLastEntry.indexOf("~") >= 0) {
             finalList.add(nextElement);
             return finalList;
+            
         } else {
             Element parent = (Element)nextElement.getParentNode();
             NodeList nodeList = parent.getElementsByTagName(nodeName);
@@ -495,6 +496,7 @@ public class XML {
                 finalList.add(nodeList.item(i));
             }
             return finalList;
+            
         }
     }
     

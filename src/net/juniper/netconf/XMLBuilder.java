@@ -140,16 +140,16 @@ public class XMLBuilder {
      *          list should be {"system","services","ftp"}
      * @return XML object.
      */
-    public XML createNewConfig(List elementList) {
+    public XML createNewConfig(List<String> elementList) {
         if (elementList.size() == 0)
             return null;
         Document doc = impl.createDocument(null, "configuration", null);
         Element rootElement = doc.getDocumentElement();
-        Element elementLevelLast = doc.createElement((String)elementList.
+        Element elementLevelLast = doc.createElement(elementList.
                 get(elementList.size()-1));
         Element last = elementLevelLast;
         for (int i = elementList.size()-1; i>0; i--) {
-            Element secondLast = doc.createElement((String)elementList.get(i-1));
+            Element secondLast = doc.createElement(elementList.get(i-1));
             secondLast.appendChild(last);
             last = secondLast;
         }
@@ -253,16 +253,16 @@ public class XMLBuilder {
      *          &lt;/get-interface-information&gt;&lt;/rpc&gt;"
      * @return XML object.
      */
-    public XML createNewRPC(List elementList) {
+    public XML createNewRPC(List<String> elementList) {
         if (elementList.size() == 0)
             return null;
         Document doc = impl.createDocument(null, "rpc", null);
         Element rootElement = doc.getDocumentElement();
-        Element elementLevelLast = doc.createElement((String)elementList.
+        Element elementLevelLast = doc.createElement(elementList.
                 get(elementList.size()-1));
         Element last = elementLevelLast;
         for (int i = elementList.size()-1; i>0; i--) {
-            Element secondLast = doc.createElement((String)elementList.get(i-1));
+            Element secondLast = doc.createElement(elementList.get(i-1));
             secondLast.appendChild(last);
             last = secondLast;
         }
@@ -357,19 +357,19 @@ public class XMLBuilder {
      *          "&lt;firstElement&gt;&lt;secondElement/&gt;&lt;/firstElement&gt;
      * @return XML object.
      */
-    public XML createNewXML(List elementList) {
+    public XML createNewXML(List<String> elementList) {
         if (elementList.size() == 0)
             return null;
-        String elementLevelOne = (String)elementList.get(0);
+        String elementLevelOne = elementList.get(0);
         Document doc = impl.createDocument(null, elementLevelOne, null);
         Element rootElement = doc.getDocumentElement();
         if (elementList.size() == 1)
             return new XML(rootElement);
-        Element elementLevelLast = doc.createElement((String)elementList.
+        Element elementLevelLast = doc.createElement(elementList.
                 get(elementList.size()-1));
         Element last = elementLevelLast;
         for (int i = elementList.size()-1; i>1; i--) {
-            Element secondLast = doc.createElement((String)elementList.get(i-1));
+            Element secondLast = doc.createElement(elementList.get(i-1));
             secondLast.appendChild(last);
             last = secondLast;
         }
