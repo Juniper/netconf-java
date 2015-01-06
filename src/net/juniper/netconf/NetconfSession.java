@@ -854,6 +854,10 @@ public class NetconfSession {
         StringBuffer rpc = new StringBuffer("");
         rpc.append("<rpc>");
         rpc.append("<open-configuration>");
+        if (mode.startsWith("<"))
+            rpc.append(mode); 
+        else
+            rpc.append("<" + mode + "/>"; 
         rpc.append(mode);
         rpc.append("</open-configuration>");
         rpc.append("</rpc>");
