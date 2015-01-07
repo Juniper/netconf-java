@@ -33,7 +33,7 @@ public class parse_system_info {
               ParserConfigurationException, SAXException, IOException {
         
         //Create device
-        Device device = new Device("10.209.16.204","regress","MaRtInI",null);
+        Device device = new Device("router","username","passwd",null);
         device.connect();
         
         //Send RPC and receive RPC Reply as XML
