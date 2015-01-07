@@ -37,7 +37,7 @@ public class EditConfiguration {
          XML ftp_config = builder.createNewConfig("system", "services", "ftp");
 
          //Create the device
-         Device device = new Device("router","user","PaSsWoRd",null);
+         Device device = new Device("hostname","user","PaSsWoRd",null);
          device.connect();
 
          //Lock the configuration first
