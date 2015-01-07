@@ -75,7 +75,7 @@ public class snmp_config {
         targets.append("name", "10.0.0.1");
         
          //Create the device
-         Device device = new Device("10.209.16.204","regress","MaRtInI",null);
+         Device device = new Device("hostname","username","passwd",null);
          device.connect();
 
          //Lock the configuration first
