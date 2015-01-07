@@ -25,7 +25,7 @@ public class parse_interface_info {
     public static void main(String[] args) throws LoadException, IOException, 
             NetconfException, ParserConfigurationException, SAXException {
         
-        Device device = new Device("10.209.16.206","regress","MaRtInI",null);
+        Device device = new Device("router","username","passwd",null);
          device.connect();
 
          XML rpc_reply = device.executeRPC("get-interface-information");
