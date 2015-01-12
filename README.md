@@ -9,6 +9,11 @@ SUPPORT
 This software is not officially supported by Juniper Networks, but by a team dedicated to helping customers,
 partners, and the development community.  To report bug-fixes, issues, suggestions, please contact netconf-automation-hackers@juniper.net
 
+REQUIREMENTS
+============
+
+OpenJDK>=1.6.0
+
 SYNOPSIS
 ========
 
