@@ -857,8 +857,7 @@ public class NetconfSession {
         if (mode.startsWith("<"))
             rpc.append(mode); 
         else
-            rpc.append("<" + mode + "/>"); 
-        rpc.append(mode);
+            rpc.append("<" + mode + "/>");
         rpc.append("</open-configuration>");
         rpc.append("</rpc>");
         rpc.append("]]>]]>");
