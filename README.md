@@ -14,6 +14,11 @@ REQUIREMENTS
 
 OpenJDK>=1.6.0
 
+Releases
+========
+Latest .jar file in release section contains netconf-java compiled from Java SE 8u65.
+If user wants to use some other java version, then download the source code and compile it with desired version.
+
 SYNOPSIS
 ========
 
