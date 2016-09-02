@@ -78,18 +78,18 @@ public class NetconfSession {
     }
     
     private String getRpcReply(String rpc) throws IOException {
-        byte b[]= rpc.getBytes();
+        byte b[] = rpc.getBytes();
         netconfSession.getStdin().write(b);
-        String rpcReply = "";
+        StringBuilder rpcReply = new StringBuilder();
         while (true) {
-            String line = "";
-            line = bufferReader.readLine();
+            String line = bufferReader.readLine();
             if (line == null || line.equals("]]>]]>"))
-	        break;
-	    rpcReply += line + "\n";
+                break;
+            rpcReply.append(line).append("\n");
         }
-        return rpcReply;
+        return rpcReply.toString();
     }
+
     
     private BufferedReader getRpcReplyRunning(String rpc) throws IOException {
         byte b[]= rpc.getBytes();
