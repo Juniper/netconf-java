@@ -1,0 +1,9 @@
+<project>
+<modelVersion>4.0.0</modelVersion>
+<groupId>net.juniper.netconf</groupId>
+<artifactId>netconf-java</artifactId>
+<version>1.0.2</version>
+<build>
+  <sourceDirectory>src</sourceDirectory>
+</build>
+</project>
