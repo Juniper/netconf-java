@@ -49,6 +49,12 @@ import org.xml.sax.SAXException;
 public class NetconfSession {
 
     public final static String PROMPT = "]]>]]>";
+
+    private final static int RESPONSE_TIMEOUT = 20000;
+    private final static int THREAD_TIMEOUT = 400;
+    private final static String RPC_OPEN = "<rpc>";
+    private final static String RPC_CLOSE = "</rpc>";
+
     
     private Session netconfSession;
     private String serverCapability;
@@ -80,16 +86,9 @@ public class NetconfSession {
     }
     
     private String getRpcReply(String rpc) throws IOException {
-        byte b[] = rpc.getBytes();
-        netconfSession.getStdin().write(b);
-        StringBuilder rpcReply = new StringBuilder();
-        while (true) {
-            String line = bufferReader.readLine();
-            if (line == null || line.equals(PROMPT))
-                break;
-            rpcReply.append(line).append("\n");
-        }
-        return rpcReply.toString();
+        netconfSession.getStdin().write(rpc.getBytes());
+
+        return getResponseString(PROMPT, stdout, RESPONSE_TIMEOUT);
     }
 
     
@@ -108,7 +107,7 @@ public class NetconfSession {
                     + "</configuration>";
         }
         StringBuffer rpc = new StringBuffer();
-        rpc.append("<rpc>");
+        rpc.append(RPC_OPEN);
         rpc.append("<edit-config>");
         rpc.append("<target>");
         rpc.append("<" + target + "/>");
@@ -120,7 +119,7 @@ public class NetconfSession {
         rpc.append(configuration);
         rpc.append("</config>");
         rpc.append("</edit-config>");
-        rpc.append("</rpc>");
+        rpc.append(RPC_CLOSE);
         rpc.append(PROMPT);
         String rpcReply = getRpcReply(rpc.toString());
         lastRpcReply = rpcReply;
@@ -131,7 +130,7 @@ public class NetconfSession {
     private void loadTextConfiguration(String target, String configuration, 
             String loadType) throws LoadException, IOException, SAXException {
         StringBuffer rpc = new StringBuffer();
-        rpc.append("<rpc>");
+        rpc.append(RPC_OPEN);
         rpc.append("<edit-config>");
         rpc.append("<target>");
         rpc.append("<" + target + "/>");
@@ -145,7 +144,7 @@ public class NetconfSession {
         rpc.append("</configuration-text>");
         rpc.append("</config-text>");
         rpc.append("</edit-config>");
-        rpc.append("</rpc>");
+        rpc.append(RPC_CLOSE);
         rpc.append(PROMPT);
         String rpcReply = getRpcReply(rpc.toString());
         lastRpcReply = rpcReply;
@@ -156,8 +155,8 @@ public class NetconfSession {
     private String getConfig(String target, String configTree) 
             throws IOException {
         
-        StringBuffer rpc = new StringBuffer("");
-        rpc.append("<rpc>");
+        StringBuffer rpc = new StringBuffer();
+        rpc.append(RPC_OPEN);
         rpc.append("<get-config>");
         rpc.append("<source>");
         rpc.append("<" + target + "/>");
@@ -166,7 +165,7 @@ public class NetconfSession {
         rpc.append(configTree);
         rpc.append("</filter>");
         rpc.append("</get-config>");
-        rpc.append("</rpc>");
+        rpc.append(RPC_CLOSE);
         rpc.append(PROMPT);
         String rpcReply = getRpcReply(rpc.toString());
         lastRpcReply = rpcReply;
@@ -208,14 +207,14 @@ public class NetconfSession {
      */
     public XML executeRPC(String rpcContent) throws SAXException, IOException {
         if (rpcContent == null) {
-            throw new IllegalArgumentException("Null RPC");
+            throw new IllegalArgumentException("RpcContent can't be null");
         }
         rpcContent = rpcContent.trim();
-        if (!rpcContent.startsWith("<rpc>") && !rpcContent.equals("<rpc/>")) {
+        if (!rpcContent.startsWith(RPC_OPEN) && !rpcContent.equals("<rpc/>")) {
             if (rpcContent.startsWith("<"))
-                rpcContent = "<rpc>" + rpcContent + "</rpc>"; 
+                rpcContent = RPC_OPEN + rpcContent + RPC_CLOSE; 
             else
-                rpcContent = "<rpc>" + "<" + rpcContent + "/>" + "</rpc>"; 
+                rpcContent = RPC_OPEN + "<" + rpcContent + "/>" + RPC_CLOSE; 
         }
         rpcContent += PROMPT;
         String rpcReply = getRpcReply(rpcContent);
@@ -277,11 +276,11 @@ public class NetconfSession {
             throw new IllegalArgumentException("Null RPC");
         }
         rpcContent = rpcContent.trim();
-        if (!rpcContent.startsWith("<rpc>") && !rpcContent.equals("<rpc/>")) {
+        if (!rpcContent.startsWith(RPC_OPEN) && !rpcContent.equals("<rpc/>")) {
             if (rpcContent.startsWith("<"))
-                rpcContent = "<rpc>" + rpcContent + "</rpc>"; 
+                rpcContent = RPC_OPEN + rpcContent + RPC_CLOSE; 
             else
-                rpcContent = "<rpc>" + "<" + rpcContent + "/>" + "</rpc>"; 
+                rpcContent = RPC_OPEN + "<" + rpcContent + "/>" + RPC_CLOSE; 
         }
         rpcContent += PROMPT;
         return getRpcReplyRunning(rpcContent);
@@ -343,10 +342,10 @@ public class NetconfSession {
      * need the session anymore.
      */
     public void close() throws IOException {
-        StringBuffer rpc = new StringBuffer("");
-        rpc.append("<rpc>");
+        StringBuffer rpc = new StringBuffer();
+        rpc.append(RPC_OPEN);
         rpc.append("<close-session/>");
-        rpc.append("</rpc>");
+        rpc.append(RPC_CLOSE);
         rpc.append(PROMPT);
         String rpcReply = getRpcReply(rpc.toString());
         lastRpcReply = rpcReply;
@@ -405,14 +404,14 @@ public class NetconfSession {
      * @throws org.xml.sax.SAXException 
      */
     public boolean lockConfig() throws IOException, SAXException {
-        StringBuffer rpc = new StringBuffer("");
-        rpc.append("<rpc>");
+        StringBuffer rpc = new StringBuffer();
+        rpc.append(RPC_OPEN);
         rpc.append("<lock>");
         rpc.append("<target>");
         rpc.append("<candidate/>");
         rpc.append("</target>");
         rpc.append("</lock>");
-        rpc.append("</rpc>");
+        rpc.append(RPC_CLOSE);
         rpc.append(PROMPT);
         String rpcReply = getRpcReply(rpc.toString());
         lastRpcReply = rpcReply;
@@ -428,14 +427,14 @@ public class NetconfSession {
      * @throws org.xml.sax.SAXException 
      */
     public boolean unlockConfig() throws IOException, SAXException {
-        StringBuffer rpc = new StringBuffer("");
-        rpc.append("<rpc>");
+        StringBuffer rpc = new StringBuffer();
+        rpc.append(RPC_OPEN);
         rpc.append("<unlock>");
         rpc.append("<target>");
         rpc.append("<candidate/>");
         rpc.append("</target>");
         rpc.append("</unlock>");
-        rpc.append("</rpc>");
+        rpc.append(RPC_CLOSE);
         rpc.append(PROMPT);
         String rpcReply = getRpcReply(rpc.toString());
         lastRpcReply = rpcReply;
@@ -508,14 +507,14 @@ public class NetconfSession {
     public void loadSetConfiguration(String configuration) throws LoadException,
             IOException,
             SAXException {
-        StringBuffer rpc = new StringBuffer("");
-        rpc.append("<rpc>");
+        StringBuffer rpc = new StringBuffer();
+        rpc.append(RPC_OPEN);
         rpc.append("<load-configuration action=\"set\">");
         rpc.append("<configuration-set>");
         rpc.append(configuration);
         rpc.append("</configuration-set>");
         rpc.append("</load-configuration>");
-        rpc.append("</rpc>");
+        rpc.append(RPC_CLOSE);
         String rpcReply = getRpcReply(rpc.toString());
         lastRpcReply = rpcReply;
         if (hasError() || !isOK())
@@ -662,10 +661,10 @@ public class NetconfSession {
      * @throws org.xml.sax.SAXException 
      */
     public void commit() throws CommitException, IOException, SAXException {
-        StringBuffer rpc = new StringBuffer("");
-        rpc.append("<rpc>");
+        StringBuffer rpc = new StringBuffer();
+        rpc.append(RPC_OPEN);
         rpc.append("<commit/>");
-        rpc.append("</rpc>");
+        rpc.append(RPC_CLOSE);
         rpc.append(PROMPT);
         String rpcReply = getRpcReply(rpc.toString());
         lastRpcReply = rpcReply;
@@ -685,13 +684,13 @@ public class NetconfSession {
      */ 
     public void commitConfirm(long seconds) throws CommitException,IOException, 
             SAXException {
-        StringBuffer rpc = new StringBuffer("");
-        rpc.append("<rpc>");
+        StringBuffer rpc = new StringBuffer();
+        rpc.append(RPC_OPEN);
         rpc.append("<commit>");
         rpc.append("<confirmed/>");
         rpc.append("<confirm-timeout>" + seconds + "</confirm-timeout>");
         rpc.append("</commit>");
-        rpc.append("</rpc>");
+        rpc.append(RPC_CLOSE);
         rpc.append(PROMPT);
         String rpcReply = getRpcReply(rpc.toString());
         lastRpcReply = rpcReply;
@@ -760,14 +759,14 @@ public class NetconfSession {
      */
     public boolean validate() throws IOException, SAXException {
  
-        StringBuffer rpc = new StringBuffer("");
-        rpc.append("<rpc>");
+        StringBuffer rpc = new StringBuffer();
+        rpc.append(RPC_OPEN);
         rpc.append("<validate>");
         rpc.append("<source>");
         rpc.append("<candidate/>");
         rpc.append("</source>");
         rpc.append("</validate>");
-        rpc.append("</rpc>");
+        rpc.append(RPC_CLOSE);
         rpc.append(PROMPT);
         String rpcReply = getRpcReply(rpc.toString());
         lastRpcReply = rpcReply;
@@ -783,10 +782,10 @@ public class NetconfSession {
      * @throws java.io.IOException
      */
     public String reboot() throws SAXException, IOException {
-        StringBuffer rpc = new StringBuffer("");
-        rpc.append("<rpc>");
+        StringBuffer rpc = new StringBuffer();
+        rpc.append(RPC_OPEN);
         rpc.append("<request-reboot/>");
-        rpc.append("</rpc>");
+        rpc.append(RPC_CLOSE);
         rpc.append(PROMPT);
         String rpcReply = getRpcReply(rpc.toString());
         return rpcReply;
@@ -803,12 +802,12 @@ public class NetconfSession {
      */
     public String runCliCommand(String command) throws IOException, SAXException  {
  
-        StringBuffer rpc = new StringBuffer("");
-        rpc.append("<rpc>");
+        StringBuffer rpc = new StringBuffer();
+        rpc.append(RPC_OPEN);
         rpc.append("<command format=\"text\">");
         rpc.append(command);
         rpc.append("</command>");
-        rpc.append("</rpc>");
+        rpc.append(RPC_CLOSE);
         rpc.append(PROMPT);
         String rpcReply = getRpcReply(rpc.toString());
         lastRpcReply = rpcReply;
@@ -835,7 +834,7 @@ public class NetconfSession {
     public BufferedReader runCliCommandRunning(String command) throws 
             SAXException, IOException {
  
-        StringBuffer rpc = new StringBuffer("");
+        StringBuffer rpc = new StringBuffer();
         rpc.append("<command format=\"text\">");
         rpc.append(command);
         rpc.append("</command>");
@@ -853,15 +852,15 @@ public class NetconfSession {
      */
     public void openConfiguration(String mode) throws IOException {
         
-        StringBuffer rpc = new StringBuffer("");
-        rpc.append("<rpc>");
+        StringBuffer rpc = new StringBuffer();
+        rpc.append(RPC_OPEN);
         rpc.append("<open-configuration>");
         if (mode.startsWith("<"))
             rpc.append(mode); 
         else
             rpc.append("<" + mode + "/>");
         rpc.append("</open-configuration>");
-        rpc.append("</rpc>");
+        rpc.append(RPC_CLOSE);
         rpc.append(PROMPT);
         String rpcReply = getRpcReply(rpc.toString());
         lastRpcReply = rpcReply;
@@ -873,10 +872,10 @@ public class NetconfSession {
      * @throws java.io.IOException
      */
     public void closeConfiguration() throws IOException {
-        StringBuffer rpc = new StringBuffer("");
-        rpc.append("<rpc>");
+        StringBuffer rpc = new StringBuffer();
+        rpc.append(RPC_OPEN);
         rpc.append("<close-configuration/>");
-        rpc.append("</rpc>");
+        rpc.append(RPC_CLOSE);
         rpc.append(PROMPT);
         String rpcReply = getRpcReply(rpc.toString());
         lastRpcReply = rpcReply;
@@ -889,5 +888,31 @@ public class NetconfSession {
     public String getLastRPCReply() {
         return this.lastRpcReply;
     }
-    
+
+    private String getResponseString(String end, InputStream is, long timeout) throws IOException {
+        long startTime = System.currentTimeMillis();
+        StringBuilder result = new StringBuilder();
+
+        byte buffer[] = new byte[64];
+        while ((result.indexOf(end) < 0) &&
+                ((System.currentTimeMillis() - startTime) < timeout)) {
+            if (is.available() > 0) {
+                int byteRead = is.read(buffer);
+                result.append(new String(buffer, 0, byteRead));
+            } else {
+                try {
+                    Thread.sleep(THREAD_TIMEOUT);
+                } catch (InterruptedException ex) {
+                    ex.printStackTrace();
+                }
+            }
+        }
+        int linePosition = result.indexOf(end);
+        // Remove end line from result
+        if (linePosition >= 0) {
+            result.setLength(linePosition);
+        }
+        return result.toString();
+    }
+
 }
