@@ -47,6 +47,8 @@ import org.xml.sax.SAXException;
  * </ol>
  */
 public class NetconfSession {
+
+    public final static String PROMPT = "]]>]]>";
     
     private Session netconfSession;
     private String serverCapability;
@@ -55,7 +57,7 @@ public class NetconfSession {
     private String lastRpcReply;
     private DocumentBuilder builder;
        
-    protected NetconfSession(Session netconfSession, String hello, 
+    protected NetconfSession(Session netconfSession, String hello,
             DocumentBuilder builder) throws NetconfException, IOException {
         
         this.netconfSession = netconfSession;
@@ -83,7 +85,7 @@ public class NetconfSession {
         StringBuilder rpcReply = new StringBuilder();
         while (true) {
             String line = bufferReader.readLine();
-            if (line == null || line.equals("]]>]]>"))
+            if (line == null || line.equals(PROMPT))
                 break;
             rpcReply.append(line).append("\n");
         }
@@ -105,7 +107,7 @@ public class NetconfSession {
             configuration = "<configuration>" + configuration 
                     + "</configuration>";
         }
-        StringBuffer rpc = new StringBuffer("");
+        StringBuffer rpc = new StringBuffer();
         rpc.append("<rpc>");
         rpc.append("<edit-config>");
         rpc.append("<target>");
@@ -119,7 +121,7 @@ public class NetconfSession {
         rpc.append("</config>");
         rpc.append("</edit-config>");
         rpc.append("</rpc>");
-        rpc.append("]]>]]>");
+        rpc.append(PROMPT);
         String rpcReply = getRpcReply(rpc.toString());
         lastRpcReply = rpcReply;
         if (hasError() || !isOK())
@@ -128,7 +130,7 @@ public class NetconfSession {
     
     private void loadTextConfiguration(String target, String configuration, 
             String loadType) throws LoadException, IOException, SAXException {
-        StringBuffer rpc = new StringBuffer("");
+        StringBuffer rpc = new StringBuffer();
         rpc.append("<rpc>");
         rpc.append("<edit-config>");
         rpc.append("<target>");
@@ -144,7 +146,7 @@ public class NetconfSession {
         rpc.append("</config-text>");
         rpc.append("</edit-config>");
         rpc.append("</rpc>");
-        rpc.append("]]>]]>");
+        rpc.append(PROMPT);
         String rpcReply = getRpcReply(rpc.toString());
         lastRpcReply = rpcReply;
         if (hasError() || !isOK())
@@ -165,7 +167,7 @@ public class NetconfSession {
         rpc.append("</filter>");
         rpc.append("</get-config>");
         rpc.append("</rpc>");
-        rpc.append("]]>]]>");
+        rpc.append(PROMPT);
         String rpcReply = getRpcReply(rpc.toString());
         lastRpcReply = rpcReply;
         return lastRpcReply;
@@ -215,7 +217,7 @@ public class NetconfSession {
             else
                 rpcContent = "<rpc>" + "<" + rpcContent + "/>" + "</rpc>"; 
         }
-        rpcContent += "]]>]]>";
+        rpcContent += PROMPT;
         String rpcReply = getRpcReply(rpcContent);
         lastRpcReply = rpcReply;
         return convertToXML(rpcReply);
@@ -281,7 +283,7 @@ public class NetconfSession {
             else
                 rpcContent = "<rpc>" + "<" + rpcContent + "/>" + "</rpc>"; 
         }
-        rpcContent += "]]>]]>";
+        rpcContent += PROMPT;
         return getRpcReplyRunning(rpcContent);
     }
     
@@ -345,7 +347,7 @@ public class NetconfSession {
         rpc.append("<rpc>");
         rpc.append("<close-session/>");
         rpc.append("</rpc>");
-        rpc.append("]]>]]>");
+        rpc.append(PROMPT);
         String rpcReply = getRpcReply(rpc.toString());
         lastRpcReply = rpcReply;
         netconfSession.close();
@@ -411,7 +413,7 @@ public class NetconfSession {
         rpc.append("</target>");
         rpc.append("</lock>");
         rpc.append("</rpc>");
-        rpc.append("]]>]]>");
+        rpc.append(PROMPT);
         String rpcReply = getRpcReply(rpc.toString());
         lastRpcReply = rpcReply;
         if (hasError() || !isOK())
@@ -434,7 +436,7 @@ public class NetconfSession {
         rpc.append("</target>");
         rpc.append("</unlock>");
         rpc.append("</rpc>");
-        rpc.append("]]>]]>");
+        rpc.append(PROMPT);
         String rpcReply = getRpcReply(rpc.toString());
         lastRpcReply = rpcReply;
         if (hasError() || !isOK())
@@ -664,7 +666,7 @@ public class NetconfSession {
         rpc.append("<rpc>");
         rpc.append("<commit/>");
         rpc.append("</rpc>");
-        rpc.append("]]>]]>");
+        rpc.append(PROMPT);
         String rpcReply = getRpcReply(rpc.toString());
         lastRpcReply = rpcReply;
         if (hasError() || !isOK())
@@ -690,7 +692,7 @@ public class NetconfSession {
         rpc.append("<confirm-timeout>" + seconds + "</confirm-timeout>");
         rpc.append("</commit>");
         rpc.append("</rpc>");
-        rpc.append("]]>]]>");
+        rpc.append(PROMPT);
         String rpcReply = getRpcReply(rpc.toString());
         lastRpcReply = rpcReply;
         if (hasError() || !isOK())
@@ -766,7 +768,7 @@ public class NetconfSession {
         rpc.append("</source>");
         rpc.append("</validate>");
         rpc.append("</rpc>");
-        rpc.append("]]>]]>");
+        rpc.append(PROMPT);
         String rpcReply = getRpcReply(rpc.toString());
         lastRpcReply = rpcReply;
         if (hasError() || !isOK())
@@ -785,7 +787,7 @@ public class NetconfSession {
         rpc.append("<rpc>");
         rpc.append("<request-reboot/>");
         rpc.append("</rpc>");
-        rpc.append("]]>]]>");
+        rpc.append(PROMPT);
         String rpcReply = getRpcReply(rpc.toString());
         return rpcReply;
     }
@@ -807,7 +809,7 @@ public class NetconfSession {
         rpc.append(command);
         rpc.append("</command>");
         rpc.append("</rpc>");
-        rpc.append("]]>]]>");
+        rpc.append(PROMPT);
         String rpcReply = getRpcReply(rpc.toString());
         lastRpcReply = rpcReply;
         XML xmlReply = convertToXML(rpcReply);
@@ -860,7 +862,7 @@ public class NetconfSession {
             rpc.append("<" + mode + "/>");
         rpc.append("</open-configuration>");
         rpc.append("</rpc>");
-        rpc.append("]]>]]>");
+        rpc.append(PROMPT);
         String rpcReply = getRpcReply(rpc.toString());
         lastRpcReply = rpcReply;
     }
@@ -875,7 +877,7 @@ public class NetconfSession {
         rpc.append("<rpc>");
         rpc.append("<close-configuration/>");
         rpc.append("</rpc>");
-        rpc.append("]]>]]>");
+        rpc.append(PROMPT);
         String rpcReply = getRpcReply(rpc.toString());
         lastRpcReply = rpcReply;
     }
