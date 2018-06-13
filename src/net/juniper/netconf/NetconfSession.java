@@ -697,7 +697,28 @@ public class NetconfSession {
             throw new CommitException("Commit operation returned " +
                     "error.");
     }
-    
+
+    /**
+     * Commit the candidate configuration and rebuild the config database.
+     * @throws net.juniper.netconf.CommitException
+     * @throws java.io.IOException
+     * @throws org.xml.sax.SAXException
+     */
+    public void commitFull() throws CommitException, IOException, SAXException {
+        StringBuffer rpc = new StringBuffer("");
+        rpc.append("<rpc>");
+        rpc.append("<commit-configuration>");
+        rpc.append("<full/>");
+        rpc.append("</commit-configuration>");
+        rpc.append("</rpc>");
+        rpc.append("]]>]]>");
+        String rpcReply = getRpcReply(rpc.toString());
+        lastRpcReply = rpcReply;
+        if (hasError() || !isOK())
+            throw new CommitException("Commit operation returned error.");
+    }
+
+
     /**
      * Retrieve the candidate configuration, or part of the configuration.
      * @param configTree

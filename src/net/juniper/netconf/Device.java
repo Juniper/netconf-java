@@ -878,7 +878,23 @@ public class Device {
         }
         this.defaultSession.commitConfirm(seconds);
     }
-    
+
+    /**
+     * Commit full is an unsupported Juniper command that will commit the config and then signal all processes to
+     * check the configuration for changes. A normal commit only signals processes where there data has been modified.
+     *
+     * @throws CommitException
+     * @throws IOException
+     * @throws SAXException
+     */
+    public void commitFull() throws CommitException, IOException, SAXException {
+        if (defaultSession == null) {
+            throw new IllegalStateException("Cannot execute RPC, you need to " +
+                    "establish a connection first.");
+        }
+        this.defaultSession.commitFull();
+    }
+
     /**
      * Loads and commits the candidate configuration, Configuration can be in 
      * text/xml format.
