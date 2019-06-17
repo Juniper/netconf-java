@@ -6,20 +6,17 @@
  *
  */
 
-import java.io.IOException;
-import javax.xml.parsers.ParserConfigurationException;
-import net.juniper.netconf.NetconfException;
+import net.juniper.netconf.Device;
+import net.juniper.netconf.XML;
 import org.xml.sax.SAXException;
 
-import net.juniper.netconf.XML;
-import net.juniper.netconf.Device;
+import java.io.IOException;
 
 public class ShowChassis {
-    public static void main(String args[]) throws NetconfException, 
-              ParserConfigurationException, SAXException, IOException {
-        
-        //Create device
-        Device device = new Device("hostname","user","password",null);
+    public static void main(String[] args) throws
+            SAXException, IOException {
+
+        Device device = CreateDevice.createDevice();
         device.connect();
         
         //Send RPC and receive RPC Reply as XML

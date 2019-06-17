@@ -6,35 +6,30 @@
  *
  */
 
+
 //code to load snmp configuration
 
-import java.io.IOException;
-import javax.xml.parsers.ParserConfigurationException;
 import net.juniper.netconf.CommitException;
-import net.juniper.netconf.LoadException;
-import net.juniper.netconf.NetconfException;
-import org.xml.sax.SAXException;
-
 import net.juniper.netconf.Device;
+import net.juniper.netconf.LoadException;
 import net.juniper.netconf.XML;
 import net.juniper.netconf.XMLBuilder;
+import org.xml.sax.SAXException;
+
+import javax.xml.parsers.ParserConfigurationException;
+import java.io.IOException;
 
 
-public class snmp_config {
-    public static void main(String[] args) throws LoadException, IOException, 
-            NetconfException, ParserConfigurationException, SAXException {
-        
-        /*Build the XML configuration
-         *The XML configuration required is:
-         *
-         * <configuration>
-         *     <system>
-         *         <services>
-         *             <ftp/>
-         *         </services>
-         *     </system>
-         * </configuration>
-        <edit-config>
+/*Build the XML configuration. The XML configuration required is:
+
+<configuration>
+    <system>
+        <services>
+            <ftp/>
+        </services>
+    </system>
+</configuration>
+<edit-config>
     <target>
         <candidate></candidate>
     </target>
@@ -56,12 +51,16 @@ public class snmp_config {
         </configuration>
     </config>
 </edit-config>
-        
-        
-        
-         */
-        // XMLBuilder builder = new XMLBuilder();
-        // XML ftp_config = builder.createNewConfig("system", "services", "ftp");
+
+
+XMLBuilder builder = new XMLBuilder();
+XML ftp_config = builder.createNewConfig("system", "services", "ftp");
+
+*/
+
+public class snmp_config {
+    public static void main(String[] args) throws IOException,
+            ParserConfigurationException, SAXException {
 
         XMLBuilder builder = new XMLBuilder();
         XML trapGroupConfig = builder.createNewConfig("snmp");
@@ -73,32 +72,28 @@ public class snmp_config {
         trapGroup.append("destination-port", "162");
         XML targets = trapGroup.append("targets");
         targets.append("name", "10.0.0.1");
-        
-         //Create the device
-         Device device = new Device("hostname","username","passwd",null);
-         device.connect();
 
-         //Lock the configuration first
-         boolean isLocked = device.lockConfig();
-         if(!isLocked) {
-             System.out.println("Could not lock configuration. Exit now.");
-             return;
-         }
+        Device device = CreateDevice.createDevice();
+        device.connect();
 
-         //Load and commit the configuration
-         try {
-             device.loadXMLConfiguration(trapGroupConfig.toString(), "merge");
-             device.commit();
-         } catch(LoadException e) {
-             System.out.println(e.getMessage());
-             return;
-         } catch(CommitException e) {
-             System.out.println(e.getMessage());
-             return;
-         }
+        //Lock the configuration first
+        boolean isLocked = device.lockConfig();
+        if (!isLocked) {
+            System.out.println("Could not lock configuration. Exit now.");
+            return;
+        }
 
-         //Unlock the configuration and close the device.
-         device.unlockConfig();
-         device.close();
+        //Load and commit the configuration
+        try {
+            device.loadXMLConfiguration(trapGroupConfig.toString(), "merge");
+            device.commit();
+        } catch (LoadException | CommitException e) {
+            System.out.println(e.getMessage());
+            return;
+        }
+
+        //Unlock the configuration and close the device.
+        device.unlockConfig();
+        device.close();
     }
 }
