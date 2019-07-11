@@ -8,24 +8,19 @@
 
 package net.juniper.netconf;
 
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Charsets;
+import com.jcraft.jsch.Channel;
 import com.jcraft.jsch.JSchException;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
-import com.jcraft.jsch.Channel;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.xml.sax.InputSource;
 import org.xml.sax.SAXException;
-import com.google.common.annotations.VisibleForTesting;
 
 import javax.xml.parsers.DocumentBuilder;
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.io.FileNotFoundException;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.io.StringReader;
+import java.io.*;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -33,7 +28,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * A <code>NetconfSession</code> object is used to call the Netconf driver 
+ * A <code>NetconfSession</code> object is used to call the Netconf driver
  * methods.
  * This is derived by creating a Device first,
  * and calling createNetconfSession().
@@ -41,16 +36,16 @@ import java.util.List;
  * Typically, one
  * <ol>
  * <li>creates a Device object.</li>
- * <li>calls the createNetconfSession() method to get a NetconfSession 
+ * <li>calls the createNetconfSession() method to get a NetconfSession
  * object.</li>
  * <li>perform operations on the NetconfSession object.</li>
- * <li>finally, one must close the NetconfSession and release resources with 
+ * <li>finally, one must close the NetconfSession and release resources with
  * the {@link #close() close()} method.</li>
  * </ol>
  */
 @Slf4j
 public class NetconfSession {
-    
+
     private final Channel netconfChannel;
     private String serverCapability;
 
@@ -59,16 +54,15 @@ public class NetconfSession {
 
     private String lastRpcReply;
     private final DocumentBuilder builder;
+    private int messageId = 0;
 
     private static final String CANDIDATE_CONFIG = "candidate";
     private static final String EMPTY_CONFIGURATION_TAG = "<configuration></configuration>";
     private static final String RUNNING_CONFIG = "running";
-    private static final String DEVICE_PROMPT = "]]>]]>";
-
     private static final String NETCONF_SYNTAX_ERROR_MSG_FROM_DEVICE = "netconf error: syntax error";
-       
+
     NetconfSession(Channel netconfChannel, int timeout, String hello,
-                   DocumentBuilder builder) throws IOException{
+                   DocumentBuilder builder) throws IOException {
 
         stdInStreamFromDevice = netconfChannel.getInputStream();
         stdOutStreamToDevice = netconfChannel.getOutputStream();
@@ -83,18 +77,17 @@ public class NetconfSession {
 
         sendHello(hello);
     }
-    
+
     private XML convertToXML(String xml) throws SAXException, IOException {
         if (xml.contains(NETCONF_SYNTAX_ERROR_MSG_FROM_DEVICE)) {
             throw new NetconfException(String.format("Netconf server detected an error: %s", xml));
         }
         Document doc = builder.parse(new InputSource(new StringReader(xml)));
-        Element root = doc.getDocumentElement(); 
+        Element root = doc.getDocumentElement();
         return new XML(root);
     }
-    
+
     private void sendHello(String hello) throws IOException {
-        log.debug("Sending Netconf Capabilities Hello message. {}", hello);
         String reply = getRpcReply(hello);
         serverCapability = reply;
         lastRpcReply = reply;
@@ -102,48 +95,58 @@ public class NetconfSession {
 
     @VisibleForTesting
     String getRpcReply(String rpc) throws IOException {
-        stdOutStreamToDevice.write(rpc.getBytes(Charset.defaultCharset()));
-        stdOutStreamToDevice.flush();
-        StringBuilder rpcReply = new StringBuilder();
-        BufferedReader bufferReader = new BufferedReader(
-                new InputStreamReader(stdInStreamFromDevice, Charset.defaultCharset()));
-        while (true) {
+        // write the rpc to the device
+        BufferedReader bufferedReader = getRpcReplyRunning(rpc);
 
-            String line = bufferReader.readLine();
-            if (line == null || line.equals(DEVICE_PROMPT)) {
-                break;
+        // reading the rpc reply from the device
+        StringBuilder rpcReply = new StringBuilder();
+        while (!rpcReply.toString().contains(NetconfConstants.DEVICE_PROMPT)) {
+            int line = bufferedReader.read();
+            if (line == -1) {
+                throw new NetconfException("Input Stream has been closed during reading.");
             }
-            rpcReply.append(line).append("\n");
+            rpcReply.append((char) line);
         }
-        return rpcReply.toString();
+
+        // fixing the rpc reply by removing device prompt
+        String reply = rpcReply.toString().replace(NetconfConstants.DEVICE_PROMPT, "");
+        log.debug("Received Netconf RPC-Reply\n{}", reply);
+        return reply;
     }
 
-    
     private BufferedReader getRpcReplyRunning(String rpc) throws IOException {
-        stdOutStreamToDevice.write(rpc.getBytes(Charset.defaultCharset()));
+        // RFC conformance for XML type, namespaces and message ids for RPCs
+        messageId++;
+        rpc = rpc.replace("<rpc>", "<rpc xmlns=\"" + NetconfConstants.URN_XML_NS_NETCONF_BASE_1_0 + "\" message-id=\"" + messageId + "\">").trim();
+        if (!rpc.contains(NetconfConstants.XML_VERSION)) {
+            rpc = NetconfConstants.XML_VERSION + rpc;
+        }
+
+        // writing the rpc to the device
+        log.debug("Sending Netconf RPC\n{}", rpc);
+        stdOutStreamToDevice.write(rpc.getBytes(Charsets.UTF_8));
         stdOutStreamToDevice.flush();
         return new BufferedReader(
-                new InputStreamReader(stdInStreamFromDevice, Charset.defaultCharset()));
+                new InputStreamReader(stdInStreamFromDevice, Charsets.UTF_8));
     }
 
 
     /**
      * Loads the candidate configuration, Configuration should be in XML format.
-     * @param configuration
-     *            Configuration,in XML format, to be loaded. For example,
-     * "&lt;configuration&gt;&lt;system&gt;&lt;services&gt;&lt;ftp/&gt;&lt;
-     * services/&gt;&lt;/system&gt;&lt;/configuration/&gt;"
-     * will load 'ftp' under the 'systems services' hierarchy.
-     * @param loadType
-     *           You can choose "merge" or "replace" as the loadType.
+     *
+     * @param configuration Configuration,in XML format, to be loaded. For example,
+     *                      "&lt;configuration&gt;&lt;system&gt;&lt;services&gt;&lt;ftp/&gt;&lt;
+     *                      services/&gt;&lt;/system&gt;&lt;/configuration/&gt;"
+     *                      will load 'ftp' under the 'systems services' hierarchy.
+     * @param loadType      You can choose "merge" or "replace" as the loadType.
      * @throws org.xml.sax.SAXException If there are issues parsing the config file.
-     * @throws java.io.IOException If there are issues reading the config file.
+     * @throws java.io.IOException      If there are issues reading the config file.
      */
     public void loadXMLConfiguration(String configuration, String loadType) throws IOException, SAXException {
         validateLoadType(loadType);
         configuration = configuration.trim();
         if (!configuration.startsWith("<configuration")) {
-            configuration = "<configuration>" + configuration 
+            configuration = "<configuration>" + configuration
                     + "</configuration>";
         }
         String rpc = "<rpc>" +
@@ -159,7 +162,7 @@ public class NetconfSession {
                 "</config>" +
                 "</edit-config>" +
                 "</rpc>" +
-                DEVICE_PROMPT;
+                NetconfConstants.DEVICE_PROMPT;
         lastRpcReply = getRpcReply(rpc);
         if (hasError() || !isOK())
             throw new LoadException("Load operation returned error.");
@@ -168,18 +171,17 @@ public class NetconfSession {
     /**
      * Loads the candidate configuration, Configuration should be in text/tree
      * format.
-     * @param configuration
-     *            Configuration,in text/tree format, to be loaded. For example,
-     * " system {
-     *     services {
-     *         ftp;
-     *     }
-     *   }"
-     * will load 'ftp' under the 'systems services' hierarchy.
-     * @param loadType
-     *           You can choose "merge" or "replace" as the loadType.
+     *
+     * @param configuration Configuration,in text/tree format, to be loaded. For example,
+     *                      " system {
+     *                      services {
+     *                      ftp;
+     *                      }
+     *                      }"
+     *                      will load 'ftp' under the 'systems services' hierarchy.
+     * @param loadType      You can choose "merge" or "replace" as the loadType.
      * @throws org.xml.sax.SAXException If there are issues parsing the config file.
-     * @throws java.io.IOException If there are issues reading the config file.
+     * @throws java.io.IOException      If there are issues reading the config file.
      */
     public void loadTextConfiguration(String configuration, String loadType) throws IOException, SAXException {
         String rpc = "<rpc>" +
@@ -197,12 +199,12 @@ public class NetconfSession {
                 "</config-text>" +
                 "</edit-config>" +
                 "</rpc>" +
-                DEVICE_PROMPT;
+                NetconfConstants.DEVICE_PROMPT;
         lastRpcReply = getRpcReply(rpc);
         if (hasError() || !isOK())
             throw new LoadException("Load operation returned error");
     }
-    
+
     private String getConfig(String configTree) throws IOException {
 
         String rpc = "<rpc>" +
@@ -215,7 +217,7 @@ public class NetconfSession {
                 "</filter>" +
                 "</get-config>" +
                 "</rpc>" +
-                DEVICE_PROMPT;
+                NetconfConstants.DEVICE_PROMPT;
         lastRpcReply = getRpcReply(rpc);
         return lastRpcReply;
     }
@@ -233,33 +235,34 @@ public class NetconfSession {
                 "</filter>" +
                 "</get-config>" +
                 "</rpc>" +
-                DEVICE_PROMPT;
+                NetconfConstants.DEVICE_PROMPT;
         lastRpcReply = getRpcReply(rpc);
         return lastRpcReply;
     }
 
     /**
      * Get capability of the Netconf server.
+     *
      * @return server capability
      */
     public String getServerCapability() {
         return serverCapability;
     }
-    
+
     /**
-     * Send an RPC(as String object) over the default Netconf session and get 
+     * Send an RPC(as String object) over the default Netconf session and get
      * the response as an XML object.
      * <p>
-     * @param rpcContent
-     *          RPC content to be sent. For example, to send an rpc 
-     *          &lt;rpc&gt;&lt;get-chassis-inventory/&gt;&lt;/rpc&gt;, the 
-     *          String to be passed can be 
-     *                 "&lt;get-chassis-inventory/&gt;" OR
-     *                 "get-chassis-inventory" OR
-     *                 "&lt;rpc&gt;&lt;get-chassis-inventory/&gt;&lt;/rpc&gt;"
+     *
+     * @param rpcContent RPC content to be sent. For example, to send an rpc
+     *                   &lt;rpc&gt;&lt;get-chassis-inventory/&gt;&lt;/rpc&gt;, the
+     *                   String to be passed can be
+     *                   "&lt;get-chassis-inventory/&gt;" OR
+     *                   "get-chassis-inventory" OR
+     *                   "&lt;rpc&gt;&lt;get-chassis-inventory/&gt;&lt;/rpc&gt;"
      * @return RPC reply sent by Netconf server
      * @throws org.xml.sax.SAXException If the XML Reply cannot be parsed.
-     * @throws java.io.IOException If there are issues communicating with the netconf server.
+     * @throws java.io.IOException      If there are issues communicating with the netconf server.
      */
     public XML executeRPC(String rpcContent) throws SAXException, IOException {
         String rpcReply = getRpcReply(fixupRpc(rpcContent));
@@ -271,12 +274,12 @@ public class NetconfSession {
      * Send an RPC(as XML object) over the Netconf session and get the response
      * as an XML object.
      * <p>
-     * @param rpc
-     *          RPC to be sent. Use the XMLBuilder to create RPC as an
-     *          XML object.
+     *
+     * @param rpc RPC to be sent. Use the XMLBuilder to create RPC as an
+     *            XML object.
      * @return RPC reply sent by Netconf server
      * @throws org.xml.sax.SAXException If the XML Reply cannot be parsed.
-     * @throws java.io.IOException If there are issues communicating with the netconf server.
+     * @throws java.io.IOException      If there are issues communicating with the netconf server.
      */
     public XML executeRPC(XML rpc) throws SAXException, IOException {
         return executeRPC(rpc.toString());
@@ -286,11 +289,11 @@ public class NetconfSession {
      * Send an RPC(as Document object) over the Netconf session and get the
      * response as an XML object.
      * <p>
-     * @param rpcDoc
-     *          RPC content to be sent, as a org.w3c.dom.Document object.
+     *
+     * @param rpcDoc RPC content to be sent, as a org.w3c.dom.Document object.
      * @return RPC reply sent by Netconf server
      * @throws org.xml.sax.SAXException If the XML Reply cannot be parsed.
-     * @throws java.io.IOException If there are issues communicating with the netconf server.
+     * @throws java.io.IOException      If there are issues communicating with the netconf server.
      */
     public XML executeRPC(Document rpcDoc) throws SAXException, IOException {
         Element root = rpcDoc.getDocumentElement();
@@ -301,6 +304,7 @@ public class NetconfSession {
 
     /**
      * Given an RPC command, wrap it in RPC tags.
+     * https://tools.ietf.org/html/rfc6241#section-4.1
      *
      * @param rpcContent an RPC command that may or may not be wrapped in  &lt; or &gt;
      * @return a string of the RPC command wrapped in &lt;rpc&gt;&lt; &gt;&lt;/rpc&gt;
@@ -318,65 +322,66 @@ public class NetconfSession {
             else
                 rpcContent = "<rpc>" + "<" + rpcContent + "/>" + "</rpc>";
         }
-        return rpcContent + DEVICE_PROMPT;
+        return rpcContent + NetconfConstants.DEVICE_PROMPT;
     }
 
 
     /**
-     * Send an RPC(as String object) over the default Netconf session and get 
+     * Send an RPC(as String object) over the default Netconf session and get
      * the response as a BufferedReader.
      * <p>
-     * @param rpcContent
-     *          RPC content to be sent. For example, to send an rpc 
-     *          &lt;rpc&gt;&lt;get-chassis-inventory/&gt;&lt;/rpc&gt;, the 
-     *          String to be passed can be 
-     *                 "&lt;get-chassis-inventory/&gt;" OR
-     *                 "get-chassis-inventory" OR
-     *                 "&lt;rpc&gt;&lt;get-chassis-inventory/&gt;&lt;/rpc&gt;"
-     * @return RPC reply sent by Netconf server as a BufferedReader. This is 
-     *         useful if we want continuous stream of output, rather than wait
-     *         for whole output till command execution completes.
+     *
+     * @param rpcContent RPC content to be sent. For example, to send an rpc
+     *                   &lt;rpc&gt;&lt;get-chassis-inventory/&gt;&lt;/rpc&gt;, the
+     *                   String to be passed can be
+     *                   "&lt;get-chassis-inventory/&gt;" OR
+     *                   "get-chassis-inventory" OR
+     *                   "&lt;rpc&gt;&lt;get-chassis-inventory/&gt;&lt;/rpc&gt;"
+     * @return RPC reply sent by Netconf server as a BufferedReader. This is
+     * useful if we want continuous stream of output, rather than wait
+     * for whole output till command execution completes.
      * @throws java.io.IOException If there are issues communicating with the netconf server.
      */
     public BufferedReader executeRPCRunning(String rpcContent) throws IOException {
         return getRpcReplyRunning(fixupRpc(rpcContent));
     }
-    
+
     /**
-     * Send an RPC(as XML object) over the Netconf session and get the response 
+     * Send an RPC(as XML object) over the Netconf session and get the response
      * as a BufferedReader.
      * <p>
-     * @param rpc
-     *          RPC to be sent. Use the XMLBuilder to create RPC as an
-     *          XML object.
-     * @return RPC reply sent by Netconf server as a BufferedReader. This is 
-     *         useful if we want continuous stream of output, rather than wait
-     *         for whole output till command execution completes.
+     *
+     * @param rpc RPC to be sent. Use the XMLBuilder to create RPC as an
+     *            XML object.
+     * @return RPC reply sent by Netconf server as a BufferedReader. This is
+     * useful if we want continuous stream of output, rather than wait
+     * for whole output till command execution completes.
      * @throws java.io.IOException If there are issues communicating with the netconf server.
-     * */
+     */
     public BufferedReader executeRPCRunning(XML rpc) throws IOException {
         return executeRPCRunning(rpc.toString());
     }
-    
+
     /**
-     * Send an RPC(as Document object) over the Netconf session and get the 
+     * Send an RPC(as Document object) over the Netconf session and get the
      * response as a BufferedReader.
      * <p>
-     * @param rpcDoc
-     *          RPC content to be sent, as a org.w3c.dom.Document object.
-     * @return RPC reply sent by Netconf server as a BufferedReader. This is 
-     *         useful if we want continuous stream of output, rather than wait
-     *         for whole output till command execution completes.
+     *
+     * @param rpcDoc RPC content to be sent, as a org.w3c.dom.Document object.
+     * @return RPC reply sent by Netconf server as a BufferedReader. This is
+     * useful if we want continuous stream of output, rather than wait
+     * for whole output till command execution completes.
      * @throws java.io.IOException If there are issues communicating with the netconf server.
-     * */
+     */
     public BufferedReader executeRPCRunning(Document rpcDoc) throws IOException {
         Element root = rpcDoc.getDocumentElement();
         XML xml = new XML(root);
         return executeRPCRunning(xml);
     }
-    
+
     /**
      * Get the session ID of the Netconf session.
+     *
      * @return Session ID as a string.
      */
     public String getSessionId() {
@@ -388,26 +393,28 @@ public class NetconfSession {
             return null;
         return idSplit[0];
     }
-    
+
     /**
-     * Close the Netconf session. You should always call this once you don't 
+     * Close the Netconf session. You should always call this once you don't
      * need the session anymore.
+     *
      * @throws IOException if there are errors communicating with the Device
      */
     public void close() throws IOException {
         String rpc = "<rpc>" +
                 "<close-session/>" +
                 "</rpc>" +
-                DEVICE_PROMPT;
+                NetconfConstants.DEVICE_PROMPT;
         lastRpcReply = getRpcReply(rpc);
         netconfChannel.disconnect();
     }
 
     /**
      * Check if the last RPC reply returned from Netconf server has any error.
+     *
      * @return true if any errors are found in last RPC reply.
      * @throws org.xml.sax.SAXException If the XML Reply cannot be parsed.
-     * @throws java.io.IOException If there are issues communicating with the netconf server.
+     * @throws java.io.IOException      If there are issues communicating with the netconf server.
      */
     public boolean hasError() throws SAXException, IOException {
         if (lastRpcReply == null || !(lastRpcReply.contains("<rpc-error>")))
@@ -426,9 +433,10 @@ public class NetconfSession {
 
     /**
      * Check if the last RPC reply returned from Netconf server has any warning.
+     *
      * @return true if any errors are found in last RPC reply.
      * @throws org.xml.sax.SAXException If the XML Reply cannot be parsed.
-     * @throws java.io.IOException If there are issues communicating with the netconf server.
+     * @throws java.io.IOException      If there are issues communicating with the netconf server.
      */
     public boolean hasWarning() throws SAXException, IOException {
         if (lastRpcReply == null || !(lastRpcReply.contains("<rpc-error>")))
@@ -436,21 +444,23 @@ public class NetconfSession {
         String errorSeverity = parseForErrors(lastRpcReply);
         return errorSeverity != null && errorSeverity.equals("warning");
     }
-    
+
     /**
-     * Check if the last RPC reply returned from Netconf server, 
+     * Check if the last RPC reply returned from Netconf server,
      * contains &lt;ok/&gt; tag.
+     *
      * @return true if &lt;ok/&gt; tag is found in last RPC reply.
      */
     public boolean isOK() {
         return lastRpcReply != null && lastRpcReply.contains("<ok/>");
     }
-    
+
     /**
      * Locks the candidate configuration.
+     *
      * @return true if successful.
      * @throws org.xml.sax.SAXException If the XML Reply cannot be parsed.
-     * @throws java.io.IOException If there are issues communicating with the netconf server.
+     * @throws java.io.IOException      If there are issues communicating with the netconf server.
      */
     public boolean lockConfig() throws IOException, SAXException {
         String rpc = "<rpc>" +
@@ -460,16 +470,17 @@ public class NetconfSession {
                 "</target>" +
                 "</lock>" +
                 "</rpc>" +
-                DEVICE_PROMPT;
+                NetconfConstants.DEVICE_PROMPT;
         lastRpcReply = getRpcReply(rpc);
         return !hasError() && isOK();
     }
-    
+
     /**
      * Unlocks the candidate configuration.
+     *
      * @return true if successful.
      * @throws org.xml.sax.SAXException If the XML Reply cannot be parsed.
-     * @throws java.io.IOException If there are issues communicating with the netconf server.
+     * @throws java.io.IOException      If there are issues communicating with the netconf server.
      */
     public boolean unlockConfig() throws IOException, SAXException {
         String rpc = "<rpc>" +
@@ -479,22 +490,22 @@ public class NetconfSession {
                 "</target>" +
                 "</unlock>" +
                 "</rpc>" +
-                DEVICE_PROMPT;
+                NetconfConstants.DEVICE_PROMPT;
         lastRpcReply = getRpcReply(rpc);
         return !hasError() && isOK();
     }
-    
+
     /**
-     * Loads the candidate configuration, Configuration should be in set 
+     * Loads the candidate configuration, Configuration should be in set
      * format.
      * NOTE: This method is applicable only for JUNOS release 11.4 and above.
-     * @param configuration
-     *            Configuration,in set format, to be loaded. For example,
-     * "set system services ftp"
-     * will load 'ftp' under the 'systems services' hierarchy. 
-     * To load multiple set statements, separate them by '\n' character.
+     *
+     * @param configuration Configuration,in set format, to be loaded. For example,
+     *                      "set system services ftp"
+     *                      will load 'ftp' under the 'systems services' hierarchy.
+     *                      To load multiple set statements, separate them by '\n' character.
      * @throws org.xml.sax.SAXException If there are issues parsing the config file.
-     * @throws java.io.IOException If there are issues reading the config file.
+     * @throws java.io.IOException      If there are issues reading the config file.
      */
     public void loadSetConfiguration(String configuration) throws IOException, SAXException {
         String rpc = "<rpc>" +
@@ -510,15 +521,14 @@ public class NetconfSession {
     }
 
     /**
-     * Loads the candidate configuration from file, 
+     * Loads the candidate configuration from file,
      * configuration should be in XML format.
-     * @param configFile
-     *            Path name of file containing configuration,in xml format,
-     *            to be loaded. 
-     * @param loadType
-     *           You can choose "merge" or "replace" as the loadType.
+     *
+     * @param configFile Path name of file containing configuration,in xml format,
+     *                   to be loaded.
+     * @param loadType   You can choose "merge" or "replace" as the loadType.
      * @throws org.xml.sax.SAXException If there are issues parsing the config file.
-     * @throws java.io.IOException If there are issues reading the config file.
+     * @throws java.io.IOException      If there are issues reading the config file.
      */
     public void loadXMLFile(String configFile, String loadType) throws IOException, SAXException {
         validateLoadType(loadType);
@@ -540,10 +550,11 @@ public class NetconfSession {
 
     /**
      * Read the config file and return as a string.
+     *
      * @param configFile The name of the configuration file
      * @return a string of the config file.
      * @throws java.io.IOException If there are issues reading the config file.
-     * */
+     */
     private String readConfigFile(String configFile) throws IOException {
         try {
             return new String(Files.readAllBytes(Paths.get(configFile)), Charset.defaultCharset().name());
@@ -554,60 +565,58 @@ public class NetconfSession {
 
 
     /**
-     * Loads the candidate configuration from file, 
+     * Loads the candidate configuration from file,
      * configuration should be in text/tree format.
-     * @param configFile
-     *            Path name of file containing configuration,in xml format,
-     *            to be loaded. 
-     * @param loadType
-     *           You can choose "merge" or "replace" as the loadType.
+     *
+     * @param configFile Path name of file containing configuration,in xml format,
+     *                   to be loaded.
+     * @param loadType   You can choose "merge" or "replace" as the loadType.
      * @throws org.xml.sax.SAXException If there are issues parsing the config file.
-     * @throws java.io.IOException If there are issues reading the config file.
+     * @throws java.io.IOException      If there are issues reading the config file.
      */
     public void loadTextFile(String configFile, String loadType) throws IOException, SAXException {
         validateLoadType(loadType);
-        loadTextConfiguration(readConfigFile(configFile),loadType);
+        loadTextConfiguration(readConfigFile(configFile), loadType);
     }
-    
+
     /**
      * Loads the candidate configuration from file,
      * configuration should be in set format.
      * NOTE: This method is applicable only for JUNOS release 11.4 and above.
-     * @param configFile
-     *            Path name of file containing configuration,in set format, 
-     *            to be loaded.
+     *
+     * @param configFile Path name of file containing configuration,in set format,
+     *                   to be loaded.
      * @throws org.xml.sax.SAXException If there are issues parsing the config file.
-     * @throws java.io.IOException If there are issues reading the config file.
+     * @throws java.io.IOException      If there are issues reading the config file.
      */
-    public void loadSetFile(String configFile) throws 
+    public void loadSetFile(String configFile) throws
             IOException, SAXException {
         loadSetConfiguration(readConfigFile(configFile));
     }
-    
+
     /**
-     * Loads and commits the candidate configuration, Configuration can be in 
+     * Loads and commits the candidate configuration, Configuration can be in
      * text/xml/set format.
-     * @param configFile
-     *            Path name of file containing configuration,in text/xml/set format,
-     *            to be loaded. For example,
-     * " system {
-     *     services {
-     *         ftp;
-     *     }
-     *   }"
-     * will load 'ftp' under the 'systems services' hierarchy.  
-     * OR
-     * "&lt;configuration&gt;&lt;system&gt;&lt;services&gt;&lt;ftp/&gt;&lt;
-     * services/&gt;&lt;/system&gt;&lt;/configuration/&gt;"
-     * will load 'ftp' under the 'systems services' hierarchy.  
-     * OR
-     * "set system services ftp"
-     * will load 'ftp' under the 'systems services' hierarchy.
-     * @param loadType
-     *           You can choose "merge" or "replace" as the loadType.
-     * NOTE: This parameter's value is redundant in case the file contains
-     * configuration in 'set' format.
-     * @throws java.io.IOException if there are errors communication with the netconf server.
+     *
+     * @param configFile Path name of file containing configuration,in text/xml/set format,
+     *                   to be loaded. For example,
+     *                   " system {
+     *                   services {
+     *                   ftp;
+     *                   }
+     *                   }"
+     *                   will load 'ftp' under the 'systems services' hierarchy.
+     *                   OR
+     *                   "&lt;configuration&gt;&lt;system&gt;&lt;services&gt;&lt;ftp/&gt;&lt;
+     *                   services/&gt;&lt;/system&gt;&lt;/configuration/&gt;"
+     *                   will load 'ftp' under the 'systems services' hierarchy.
+     *                   OR
+     *                   "set system services ftp"
+     *                   will load 'ftp' under the 'systems services' hierarchy.
+     * @param loadType   You can choose "merge" or "replace" as the loadType.
+     *                   NOTE: This parameter's value is redundant in case the file contains
+     *                   configuration in 'set' format.
+     * @throws java.io.IOException      if there are errors communication with the netconf server.
      * @throws org.xml.sax.SAXException if there are errors parsing the XML reply.
      */
     public void commitThisConfiguration(String configFile, String loadType) throws IOException, SAXException {
@@ -628,31 +637,32 @@ public class NetconfSession {
         }
         this.unlockConfig();
     }
-    
+
     /**
      * Commit the candidate configuration.
-     * @throws java.io.IOException If there are errors communicating with the netconf server.
+     *
+     * @throws java.io.IOException      If there are errors communicating with the netconf server.
      * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
      */
     public void commit() throws IOException, SAXException {
         String rpc = "<rpc>" +
                 "<commit/>" +
                 "</rpc>" +
-                DEVICE_PROMPT;
+                NetconfConstants.DEVICE_PROMPT;
         lastRpcReply = getRpcReply(rpc);
         if (hasError() || !isOK())
             throw new CommitException("Commit operation returned error.");
     }
-    
+
     /**
-     * Commit the candidate configuration, temporarily. This is equivalent of 
+     * Commit the candidate configuration, temporarily. This is equivalent of
      * 'commit confirm'
-     * @param seconds
-     *           Time in seconds, after which the previous active configuration 
-     *           is reverted back to.
-     * @throws java.io.IOException If there are errors communicating with the netconf server.
+     *
+     * @param seconds Time in seconds, after which the previous active configuration
+     *                is reverted back to.
+     * @throws java.io.IOException      If there are errors communicating with the netconf server.
      * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
-     */ 
+     */
     public void commitConfirm(long seconds) throws IOException, SAXException {
         String rpc = "<rpc>" +
                 "<commit>" +
@@ -660,7 +670,7 @@ public class NetconfSession {
                 "<confirm-timeout>" + seconds + "</confirm-timeout>" +
                 "</commit>" +
                 "</rpc>" +
-                DEVICE_PROMPT;
+                NetconfConstants.DEVICE_PROMPT;
         lastRpcReply = getRpcReply(rpc);
         if (hasError() || !isOK())
             throw new CommitException("Commit operation returned " +
@@ -669,9 +679,10 @@ public class NetconfSession {
 
     /**
      * Commit the candidate configuration and rebuild the config database.
+     *
      * @throws net.juniper.netconf.CommitException if there is an error committing the config.
-     * @throws java.io.IOException If there are errors communicating with the netconf server.
-     * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
+     * @throws java.io.IOException                 If there are errors communicating with the netconf server.
+     * @throws org.xml.sax.SAXException            If there are errors parsing the XML reply.
      */
     public void commitFull() throws CommitException, IOException, SAXException {
         String rpc = "<rpc>" +
@@ -679,7 +690,7 @@ public class NetconfSession {
                 "<full/>" +
                 "</commit-configuration>" +
                 "</rpc>" +
-                DEVICE_PROMPT;
+                NetconfConstants.DEVICE_PROMPT;
         lastRpcReply = getRpcReply(rpc);
         if (hasError() || !isOK())
             throw new CommitException("Commit operation returned error.");
@@ -688,58 +699,61 @@ public class NetconfSession {
 
     /**
      * Retrieve the candidate configuration, or part of the configuration.
-     * @param configTree
-     *           configuration hierarchy to be retrieved as the argument.
-     * For example, to get the whole configuration, argument should be 
-     * &lt;configuration&gt;&lt;/configuration&gt;
+     *
+     * @param configTree configuration hierarchy to be retrieved as the argument.
+     *                   For example, to get the whole configuration, argument should be
+     *                   &lt;configuration&gt;&lt;/configuration&gt;
      * @return configuration data as XML object.
-     * @throws java.io.IOException If there are errors communicating with the netconf server.
+     * @throws java.io.IOException      If there are errors communicating with the netconf server.
      * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
      */
-    public XML getCandidateConfig(String configTree) throws SAXException, 
+    public XML getCandidateConfig(String configTree) throws SAXException,
             IOException {
         return convertToXML(getConfig(configTree));
     }
-    
+
     /**
      * Retrieve the running configuration, or part of the configuration.
-     * @param configTree
-     *           configuration hierarchy to be retrieved as the argument.
-     * For example, to get the whole configuration, argument should be 
-     * &lt;configuration&gt;&lt;/configuration&gt;
+     *
+     * @param configTree configuration hierarchy to be retrieved as the argument.
+     *                   For example, to get the whole configuration, argument should be
+     *                   &lt;configuration&gt;&lt;/configuration&gt;
      * @return configuration data as XML object.
-     * @throws java.io.IOException If there are errors communicating with the netconf server.
+     * @throws java.io.IOException      If there are errors communicating with the netconf server.
      * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
      */
-    public XML getRunningConfig(String configTree) throws SAXException, 
+    public XML getRunningConfig(String configTree) throws SAXException,
             IOException {
         return convertToXML(getConfig(RUNNING_CONFIG, configTree));
     }
-    
+
     /**
      * Retrieve the whole candidate configuration.
+     *
      * @return configuration data as XML object.
-     * @throws java.io.IOException If there are errors communicating with the netconf server.
+     * @throws java.io.IOException      If there are errors communicating with the netconf server.
      * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
      */
     public XML getCandidateConfig() throws SAXException, IOException {
         return convertToXML(getConfig(EMPTY_CONFIGURATION_TAG));
     }
-    
+
     /**
      * Retrieve the whole running configuration.
+     *
      * @return configuration data as XML object.
-     * @throws java.io.IOException If there are errors communicating with the netconf server.
+     * @throws java.io.IOException      If there are errors communicating with the netconf server.
      * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
      */
     public XML getRunningConfig() throws SAXException, IOException {
         return convertToXML(getConfig(RUNNING_CONFIG, EMPTY_CONFIGURATION_TAG));
     }
-       
+
     /**
      * Validate the candidate configuration.
+     *
      * @return true if validation successful.
-     * @throws java.io.IOException If there are errors communicating with the netconf server.
+     * @throws java.io.IOException      If there are errors communicating with the netconf server.
      * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
      */
     public boolean validate() throws IOException, SAXException {
@@ -751,41 +765,42 @@ public class NetconfSession {
                 "</source>" +
                 "</validate>" +
                 "</rpc>" +
-                DEVICE_PROMPT;
+                NetconfConstants.DEVICE_PROMPT;
         lastRpcReply = getRpcReply(rpc);
         return !hasError() && isOK();
     }
-    
+
     /**
      * Reboot the device corresponding to the Netconf Session.
+     *
      * @return RPC reply sent by Netconf server.
      * @throws java.io.IOException If there are errors communicating with the netconf server.
-     * */
+     */
     public String reboot() throws IOException {
         String rpc = "<rpc>" +
                 "<request-reboot/>" +
                 "</rpc>" +
-                DEVICE_PROMPT;
+                NetconfConstants.DEVICE_PROMPT;
         return getRpcReply(rpc);
     }
-    
+
     /**
      * Run a cli command.
      * NOTE: The text output is supported for JUNOS 11.4 and later.
-     * @param command
-     *       the cli command to be executed.
+     *
+     * @param command the cli command to be executed.
      * @return result of the command, as a String.
-     * @throws java.io.IOException If there are errors communicating with the netconf server.
+     * @throws java.io.IOException      If there are errors communicating with the netconf server.
      * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
      */
-    public String runCliCommand(String command) throws IOException, SAXException  {
+    public String runCliCommand(String command) throws IOException, SAXException {
 
         String rpc = "<rpc>" +
                 "<command format=\"text\">" +
                 command +
                 "</command>" +
                 "</rpc>" +
-                DEVICE_PROMPT;
+                NetconfConstants.DEVICE_PROMPT;
         String rpcReply = getRpcReply(rpc);
         lastRpcReply = rpcReply;
         XML xmlReply = convertToXML(rpcReply);
@@ -797,16 +812,16 @@ public class NetconfSession {
         else
             return rpcReply;
     }
-    
+
     /**
      * Run a cli command.
-     * @param command
-     *       the cli command to be executed.
-     * @return result of the command, as a BufferedReader. This is 
-     *         useful if we want continuous stream of output, rather than wait
-     *         for whole output till command execution completes.
+     *
+     * @param command the cli command to be executed.
+     * @return result of the command, as a BufferedReader. This is
+     * useful if we want continuous stream of output, rather than wait
+     * for whole output till command execution completes.
      * @throws java.io.IOException If there are errors communicating with the netconf server.
-     * */
+     */
     public BufferedReader runCliCommandRunning(String command) throws
             IOException {
 
@@ -815,49 +830,51 @@ public class NetconfSession {
                 "</command>";
         return executeRPCRunning(rpc);
     }
-    
+
     /**
-     * This method should be called for load operations to happen in 'private' 
+     * This method should be called for load operations to happen in 'private'
      * mode.
-     * @param mode
-     *       Mode in which to open the configuration.
-     *       Permissible mode(s): "private"
+     *
+     * @param mode Mode in which to open the configuration.
+     *             Permissible mode(s): "private"
      * @throws java.io.IOException If there are errors communicating with the netconf server.
-     * */
+     */
     public void openConfiguration(String mode) throws IOException {
-        
+
         StringBuilder rpc = new StringBuilder();
         rpc.append("<rpc>");
         rpc.append("<open-configuration>");
         if (mode.startsWith("<"))
-            rpc.append(mode); 
+            rpc.append(mode);
         else
             rpc.append("<").append(mode).append("/>");
         rpc.append("</open-configuration>");
         rpc.append("</rpc>");
-        rpc.append(DEVICE_PROMPT);
+        rpc.append(NetconfConstants.DEVICE_PROMPT);
         lastRpcReply = getRpcReply(rpc.toString());
     }
-    
+
     /**
      * This method should be called to close a private session, in case its
      * started.
+     *
      * @throws java.io.IOException If there are errors communicating with the netconf server.
-     * */
+     */
     public void closeConfiguration() throws IOException {
         String rpc = "<rpc>" +
                 "<close-configuration/>" +
                 "</rpc>" +
-                DEVICE_PROMPT;
+                NetconfConstants.DEVICE_PROMPT;
         lastRpcReply = getRpcReply(rpc);
     }
-    
+
     /**
      * Returns the last RPC reply sent by Netconf server.
+     *
      * @return Last RPC reply, as a string.
      */
     public String getLastRPCReply() {
         return this.lastRpcReply;
     }
-    
+
 }
