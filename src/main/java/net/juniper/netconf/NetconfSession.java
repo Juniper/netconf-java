@@ -20,7 +20,13 @@ import org.xml.sax.InputSource;
 import org.xml.sax.SAXException;
 
 import javax.xml.parsers.DocumentBuilder;
-import java.io.*;
+import java.io.BufferedReader;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.io.StringReader;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -173,11 +179,11 @@ public class NetconfSession {
      * format.
      *
      * @param configuration Configuration,in text/tree format, to be loaded. For example,
-     *                      " system {
-     *                      services {
-     *                      ftp;
-     *                      }
-     *                      }"
+     *                      "system {
+     *                          services {
+     *                              ftp;
+     *                          }
+     *                       }"
      *                      will load 'ftp' under the 'systems services' hierarchy.
      * @param loadType      You can choose "merge" or "replace" as the loadType.
      * @throws org.xml.sax.SAXException If there are issues parsing the config file.
@@ -257,9 +263,9 @@ public class NetconfSession {
      * @param rpcContent RPC content to be sent. For example, to send an rpc
      *                   &lt;rpc&gt;&lt;get-chassis-inventory/&gt;&lt;/rpc&gt;, the
      *                   String to be passed can be
-     *                   "&lt;get-chassis-inventory/&gt;" OR
-     *                   "get-chassis-inventory" OR
-     *                   "&lt;rpc&gt;&lt;get-chassis-inventory/&gt;&lt;/rpc&gt;"
+     *                      "&lt;get-chassis-inventory/&gt;" OR
+     *                      "get-chassis-inventory" OR
+     *                      "&lt;rpc&gt;&lt;get-chassis-inventory/&gt;&lt;/rpc&gt;"
      * @return RPC reply sent by Netconf server
      * @throws org.xml.sax.SAXException If the XML Reply cannot be parsed.
      * @throws java.io.IOException      If there are issues communicating with the netconf server.
@@ -334,9 +340,9 @@ public class NetconfSession {
      * @param rpcContent RPC content to be sent. For example, to send an rpc
      *                   &lt;rpc&gt;&lt;get-chassis-inventory/&gt;&lt;/rpc&gt;, the
      *                   String to be passed can be
-     *                   "&lt;get-chassis-inventory/&gt;" OR
-     *                   "get-chassis-inventory" OR
-     *                   "&lt;rpc&gt;&lt;get-chassis-inventory/&gt;&lt;/rpc&gt;"
+     *                      "&lt;get-chassis-inventory/&gt;" OR
+     *                      "get-chassis-inventory" OR
+     *                      "&lt;rpc&gt;&lt;get-chassis-inventory/&gt;&lt;/rpc&gt;"
      * @return RPC reply sent by Netconf server as a BufferedReader. This is
      * useful if we want continuous stream of output, rather than wait
      * for whole output till command execution completes.
@@ -600,10 +606,10 @@ public class NetconfSession {
      *
      * @param configFile Path name of file containing configuration,in text/xml/set format,
      *                   to be loaded. For example,
-     *                   " system {
-     *                   services {
-     *                   ftp;
-     *                   }
+     *                   "system {
+     *                      services {
+     *                          ftp;
+     *                      }
      *                   }"
      *                   will load 'ftp' under the 'systems services' hierarchy.
      *                   OR

@@ -7,7 +7,11 @@
 
 package net.juniper.netconf;
 
-import com.jcraft.jsch.*;
+import com.jcraft.jsch.ChannelExec;
+import com.jcraft.jsch.ChannelSubsystem;
+import com.jcraft.jsch.JSch;
+import com.jcraft.jsch.JSchException;
+import com.jcraft.jsch.Session;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NonNull;
@@ -773,11 +777,11 @@ public class Device {
      *
      * @param configFile Path name of file containing configuration,in text/xml format,
      *                   to be loaded. For example,
-     *                   " system {
-     *                   services {
-     *                   ftp;
-     *                   }
-     *                   }"
+     *                   "system {
+     *                      services {
+     *                          ftp;
+     *                      }
+     *                    }"
      *                   will load 'ftp' under the 'systems services' hierarchy.
      *                   OR
      *                   "&lt;configuration&gt;&lt;system&gt;&lt;services&gt;&lt;ftp/&gt;&lt;
