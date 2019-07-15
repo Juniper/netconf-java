@@ -34,7 +34,7 @@ import java.util.List;
  * A <code>Device</code> is used to define a Netconf server.
  * <p>
  * A new device is created using the Device.Builder.build()
- *
+ * <p>
  * Example:
  * <pre>
  * {@code}
@@ -121,7 +121,7 @@ public class Device {
             throw new NetconfException("Strict Host Key checking requires setting the hostKeysFileName");
         }
 
-        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance() ;
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
         try {
             builder = factory.newDocumentBuilder();
         } catch (ParserConfigurationException e) {
@@ -143,23 +143,24 @@ public class Device {
      */
     private List<String> getDefaultClientCapabilities() {
         List<String> defaultCap = new ArrayList<>();
-        defaultCap.add("urn:ietf:params:xml:ns:netconf:base:1.0");
-        defaultCap.add("urn:ietf:params:xml:ns:netconf:base:1.0#candidate");
-        defaultCap.add("urn:ietf:params:xml:ns:netconf:base:1.0#confirmed-commit");
-        defaultCap.add("urn:ietf:params:xml:ns:netconf:base:1.0#validate");
-        defaultCap.add("urn:ietf:params:xml:ns:netconf:base:1.0#url?protocol=http,ftp,file");
+        defaultCap.add(NetconfConstants.URN_IETF_PARAMS_NETCONF_BASE_1_0);
+        defaultCap.add(NetconfConstants.URN_IETF_PARAMS_NETCONF_BASE_1_0 + "#candidate");
+        defaultCap.add(NetconfConstants.URN_IETF_PARAMS_NETCONF_BASE_1_0 + "#confirmed-commit");
+        defaultCap.add(NetconfConstants.URN_IETF_PARAMS_NETCONF_BASE_1_0 + "#validate");
+        defaultCap.add(NetconfConstants.URN_IETF_PARAMS_NETCONF_BASE_1_0 + "#url?protocol=http,ftp,file");
         return defaultCap;
     }
 
     /**
      * Given a list of netconf capabilities, generate the netconf hello rpc message.
+     * https://tools.ietf.org/html/rfc6241#section-8.1
      *
      * @param capabilities A list of netconf capabilities
      * @return the hello RPC that represents those capabilities.
      */
     private String createHelloRPC(List<String> capabilities) {
         StringBuilder helloRPC = new StringBuilder();
-        helloRPC.append("<hello>\n");
+        helloRPC.append("<hello xmlns=\"" + NetconfConstants.URN_XML_NS_NETCONF_BASE_1_0 + "\">\n");
         helloRPC.append("<capabilities>\n");
         for (Object o : capabilities) {
             String capability = (String) o;
@@ -170,17 +171,17 @@ public class Device {
         }
         helloRPC.append("</capabilities>\n");
         helloRPC.append("</hello>\n");
-        helloRPC.append("]]>]]>\n");
+        helloRPC.append(NetconfConstants.DEVICE_PROMPT);
         return helloRPC.toString();
     }
 
     /**
-         * Create a new Netconf session.
-         *
-         * @return NetconfSession
-         * @throws NetconfException if there are issues communicating with the Netconf server.
-         */
-        private NetconfSession createNetconfSession() throws NetconfException {
+     * Create a new Netconf session.
+     *
+     * @return NetconfSession
+     * @throws NetconfException if there are issues communicating with the Netconf server.
+     */
+    private NetconfSession createNetconfSession() throws NetconfException {
         if (!isConnected()) {
             sshClient = new JSch();
 
@@ -308,7 +309,6 @@ public class Device {
      * Close the connection to the Netconf server. All associated Netconf
      * sessions will be closed, too. Can be called at any time. Don't forget to
      * call this once you don't need the device anymore.
-     *
      */
     public void close() {
         if (!isConnected()) {
@@ -331,7 +331,7 @@ public class Device {
         }
         ChannelExec channel;
         try {
-            channel = (ChannelExec)sshSession.openChannel("exec");
+            channel = (ChannelExec) sshSession.openChannel("exec");
         } catch (JSchException e) {
             throw new NetconfException(String.format("Failed to open exec session: %s", e.getMessage()));
         }
@@ -376,7 +376,7 @@ public class Device {
         }
         ChannelExec channel;
         try {
-            channel = (ChannelExec)sshSession.openChannel("exec");
+            channel = (ChannelExec) sshSession.openChannel("exec");
         } catch (JSchException e) {
             throw new NetconfException(String.format("Failed to open exec session: %s", e.getMessage()));
         }
@@ -396,7 +396,7 @@ public class Device {
      *                   "get-chassis-inventory" OR
      *                   "&lt;rpc&gt;&lt;get-chassis-inventory/&gt;&lt;/rpc&gt;"
      * @return RPC reply sent by Netconf server
-     * @throws java.io.IOException If there are errors communicating with the netconf server.
+     * @throws java.io.IOException      If there are errors communicating with the netconf server.
      * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
      */
     public XML executeRPC(String rpcContent) throws SAXException, IOException {
@@ -415,7 +415,7 @@ public class Device {
      * @param rpc RPC to be sent. Use the XMLBuilder to create RPC as an
      *            XML object.
      * @return RPC reply sent by Netconf server
-     * @throws java.io.IOException If there are errors communicating with the netconf server.
+     * @throws java.io.IOException      If there are errors communicating with the netconf server.
      * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
      */
     public XML executeRPC(XML rpc) throws SAXException, IOException {
@@ -433,7 +433,7 @@ public class Device {
      *
      * @param rpcDoc RPC content to be sent, as a org.w3c.dom.Document object.
      * @return RPC reply sent by Netconf server
-     * @throws java.io.IOException If there are errors communicating with the netconf server.
+     * @throws java.io.IOException      If there are errors communicating with the netconf server.
      * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
      */
     public XML executeRPC(Document rpcDoc) throws SAXException, IOException {
@@ -525,8 +525,8 @@ public class Device {
      * Check if the last RPC reply returned from Netconf server has any error.
      *
      * @return true if any errors are found in last RPC reply.
-     * @throws SAXException if there are issues parsing XML from the device.
-     * @throws IOException if there are issues communicating with the device.
+     * @throws SAXException          if there are issues parsing XML from the device.
+     * @throws IOException           if there are issues communicating with the device.
      * @throws IllegalStateException if the connection is not established
      */
     public boolean hasError() throws SAXException, IOException {
@@ -542,7 +542,7 @@ public class Device {
      *
      * @return true if any errors are found in last RPC reply.
      * @throws SAXException if there are issues parsing XML from the device.
-     * @throws IOException if there are issues communicating with the device.
+     * @throws IOException  if there are issues communicating with the device.
      */
     public boolean hasWarning() throws SAXException, IOException {
         if (netconfSession == null) {
@@ -571,9 +571,9 @@ public class Device {
      * Locks the candidate configuration.
      *
      * @return true if successful.
-     * @throws java.io.IOException If there are errors communicating with the netconf server.
+     * @throws java.io.IOException      If there are errors communicating with the netconf server.
      * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
-     * @throws IllegalStateException if the connection is not established
+     * @throws IllegalStateException    if the connection is not established
      */
     public boolean lockConfig() throws IOException, SAXException {
         if (netconfSession == null) {
@@ -587,7 +587,7 @@ public class Device {
      * Unlocks the candidate configuration.
      *
      * @return true if successful.
-     * @throws java.io.IOException If there are errors communicating with the netconf server.
+     * @throws java.io.IOException      If there are errors communicating with the netconf server.
      * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
      */
     public boolean unlockConfig() throws IOException, SAXException {
@@ -606,7 +606,7 @@ public class Device {
      *                      &lt;services/&gt;&lt;/system&gt;&lt;/configuration/&gt;"
      *                      will load 'ftp' under the 'systems services' hierarchy.
      * @param loadType      You can choose "merge" or "replace" as the loadType.
-     * @throws java.io.IOException If there are errors communicating with the netconf server.
+     * @throws java.io.IOException      If there are errors communicating with the netconf server.
      * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
      */
     public void loadXMLConfiguration(String configuration, String loadType)
@@ -630,7 +630,7 @@ public class Device {
      *                      }"
      *                      will load 'ftp' under the 'systems services' hierarchy.
      * @param loadType      You can choose "merge" or "replace" as the loadType.
-     * @throws java.io.IOException If there are errors communicating with the netconf server.
+     * @throws java.io.IOException      If there are errors communicating with the netconf server.
      * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
      */
     public void loadTextConfiguration(String configuration, String loadType)
@@ -651,7 +651,7 @@ public class Device {
      *                      "set system services ftp"
      *                      will load 'ftp' under the 'systems services' hierarchy.
      *                      To load multiple set statements, separate them by '\n' character.
-     * @throws java.io.IOException If there are errors communicating with the netconf server.
+     * @throws java.io.IOException      If there are errors communicating with the netconf server.
      * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
      */
     public void loadSetConfiguration(String configuration) throws
@@ -671,7 +671,7 @@ public class Device {
      * @param configFile Path name of file containing configuration,in xml format,
      *                   to be loaded.
      * @param loadType   You can choose "merge" or "replace" as the loadType.
-     * @throws java.io.IOException If there are errors communicating with the netconf server.
+     * @throws java.io.IOException      If there are errors communicating with the netconf server.
      * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
      */
     public void loadXMLFile(String configFile, String loadType)
@@ -690,7 +690,7 @@ public class Device {
      * @param configFile Path name of file containing configuration,in xml format,
      *                   to be loaded.
      * @param loadType   You can choose "merge" or "replace" as the loadType.
-     * @throws java.io.IOException If there are errors communicating with the netconf server.
+     * @throws java.io.IOException      If there are errors communicating with the netconf server.
      * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
      */
     public void loadTextFile(String configFile, String loadType)
@@ -709,7 +709,7 @@ public class Device {
      *
      * @param configFile Path name of file containing configuration,in set format,
      *                   to be loaded.
-     * @throws java.io.IOException If there are errors communicating with the netconf server.
+     * @throws java.io.IOException      If there are errors communicating with the netconf server.
      * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
      */
     public void loadSetFile(String configFile) throws
@@ -725,8 +725,8 @@ public class Device {
      * Commit the candidate configuration.
      *
      * @throws net.juniper.netconf.CommitException if there was an error committing the configuration.
-     * @throws java.io.IOException If there are errors communicating with the netconf server.
-     * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
+     * @throws java.io.IOException                 If there are errors communicating with the netconf server.
+     * @throws org.xml.sax.SAXException            If there are errors parsing the XML reply.
      */
     public void commit() throws CommitException, IOException, SAXException {
         if (netconfSession == null) {
@@ -743,8 +743,8 @@ public class Device {
      * @param seconds Time in seconds, after which the previous active configuration
      *                is reverted back to.
      * @throws net.juniper.netconf.CommitException if there was an error committing the configuration.
-     * @throws java.io.IOException If there are errors communicating with the netconf server.
-     * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
+     * @throws java.io.IOException                 If there are errors communicating with the netconf server.
+     * @throws org.xml.sax.SAXException            If there are errors parsing the XML reply.
      */
     public void commitConfirm(long seconds) throws CommitException, IOException,
             SAXException {
@@ -760,8 +760,8 @@ public class Device {
      * check the configuration for changes. A normal commit only signals processes where there data has been modified.
      *
      * @throws CommitException if there is an error committing the config.
-     * @throws IOException if there is an error communicating with the Netconf server.
-     * @throws SAXException if there is an error parsing the XML Netconf response.
+     * @throws IOException     if there is an error communicating with the Netconf server.
+     * @throws SAXException    if there is an error parsing the XML Netconf response.
      */
     public void commitFull() throws CommitException, IOException, SAXException {
         if (netconfSession == null) {
@@ -776,21 +776,21 @@ public class Device {
      * text/xml format.
      *
      * @param configFile Path name of file containing configuration,in text/xml format,
-     *  to be loaded. For example,
-     *  " system {
-     *      services {
-     *        ftp;
-     *      }
-     *    }"
-     *  will load 'ftp' under the 'systems services' hierarchy.
-     *  OR
-     *  "&lt;configuration&gt;&lt;system&gt;&lt;services&gt;&lt;ftp/&gt;&lt;
-     *  services/&gt;&lt;/system&gt;&lt;/configuration/&gt;"
-     *  will load 'ftp' under the 'systems services' hierarchy.
+     *                   to be loaded. For example,
+     *                   "system {
+     *                      services {
+     *                          ftp;
+     *                      }
+     *                    }"
+     *                   will load 'ftp' under the 'systems services' hierarchy.
+     *                   OR
+     *                   "&lt;configuration&gt;&lt;system&gt;&lt;services&gt;&lt;ftp/&gt;&lt;
+     *                   services/&gt;&lt;/system&gt;&lt;/configuration/&gt;"
+     *                   will load 'ftp' under the 'systems services' hierarchy.
      * @param loadType   You can choose "merge" or "replace" as the loadType.
      * @throws net.juniper.netconf.CommitException if there was an error committing the configuration.
-     * @throws java.io.IOException If there are errors communicating with the netconf server.
-     * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
+     * @throws java.io.IOException                 If there are errors communicating with the netconf server.
+     * @throws org.xml.sax.SAXException            If there are errors parsing the XML reply.
      */
     public void commitThisConfiguration(String configFile, String loadType)
             throws CommitException, IOException, SAXException {
@@ -808,7 +808,7 @@ public class Device {
      *                   For example, to get the whole configuration, argument should be
      *                   &lt;configuration&gt;&lt;/configuration&gt;
      * @return configuration data as XML object.
-     * @throws java.io.IOException If there are errors communicating with the netconf server.
+     * @throws java.io.IOException      If there are errors communicating with the netconf server.
      * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
      */
     public XML getCandidateConfig(String configTree) throws SAXException,
@@ -827,7 +827,7 @@ public class Device {
      *                   For example, to get the whole configuration, argument should be
      *                   &lt;configuration&gt;&lt;/configuration&gt;
      * @return configuration data as XML object.
-     * @throws java.io.IOException If there are errors communicating with the netconf server.
+     * @throws java.io.IOException      If there are errors communicating with the netconf server.
      * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
      */
     public XML getRunningConfig(String configTree) throws SAXException,
@@ -843,7 +843,7 @@ public class Device {
      * Retrieve the whole candidate configuration.
      *
      * @return configuration data as XML object.
-     * @throws java.io.IOException If there are errors communicating with the netconf server.
+     * @throws java.io.IOException      If there are errors communicating with the netconf server.
      * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
      */
     public XML getCandidateConfig() throws SAXException, IOException {
@@ -858,7 +858,7 @@ public class Device {
      * Retrieve the whole running configuration.
      *
      * @return configuration data as XML object.
-     * @throws java.io.IOException If there are errors communicating with the netconf server.
+     * @throws java.io.IOException      If there are errors communicating with the netconf server.
      * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
      */
     public XML getRunningConfig() throws SAXException, IOException {
@@ -873,7 +873,7 @@ public class Device {
      * Validate the candidate configuration.
      *
      * @return true if validation successful.
-     * @throws java.io.IOException If there are errors communicating with the netconf server.
+     * @throws java.io.IOException      If there are errors communicating with the netconf server.
      * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
      */
     public boolean validate() throws IOException, SAXException {
@@ -890,7 +890,7 @@ public class Device {
      *
      * @param command the cli command to be executed.
      * @return result of the command.
-     * @throws java.io.IOException If there are errors communicating with the netconf server.
+     * @throws java.io.IOException      If there are errors communicating with the netconf server.
      * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
      */
     public String runCliCommand(String command) throws IOException, SAXException {
