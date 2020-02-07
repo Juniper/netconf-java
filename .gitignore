@@ -9,3 +9,12 @@ target
 .settings
 .project
 .classpath
+
+# IntelliJ #
+*.iml
+.idea/
+.gradle/
+gradle/
+libraries/
+gradlew
+gradlew.bat

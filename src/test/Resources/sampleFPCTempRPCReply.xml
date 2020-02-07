@@ -1,0 +1,16 @@
+<rpc-reply xmlns:junos="http://xml.juniper.net/junos/version/junos">
+    <environment-component-information xmlns="http://xml.juniper.net/junos/version/junos-chassis">
+        <environment-component-item>
+            <name>Routing Engine 0</name>
+            <temperature junos:celsius="41">
+                41 degrees C / 105 degrees F
+            </temperature>
+        </environment-component-item>
+        <environment-component-item>
+            <name>Routing Engine 1</name>
+            <temperature junos:celsius="37">
+                37 degrees C / 98 degrees F
+            </temperature>
+        </environment-component-item>
+    </environment-component-information>
+</rpc-reply>

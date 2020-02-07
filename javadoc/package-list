@@ -1,14 +1,1 @@
-ch.ethz.ssh2
-ch.ethz.ssh2.auth
-ch.ethz.ssh2.channel
-ch.ethz.ssh2.crypto
-ch.ethz.ssh2.crypto.cipher
-ch.ethz.ssh2.crypto.dh
-ch.ethz.ssh2.crypto.digest
-ch.ethz.ssh2.log
-ch.ethz.ssh2.packets
-ch.ethz.ssh2.sftp
-ch.ethz.ssh2.signature
-ch.ethz.ssh2.transport
-ch.ethz.ssh2.util
 net.juniper.netconf

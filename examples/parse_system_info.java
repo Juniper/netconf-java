@@ -18,22 +18,19 @@
  */
 
 
+import net.juniper.netconf.Device;
+import net.juniper.netconf.XML;
+import org.xml.sax.SAXException;
 
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
-import javax.xml.parsers.ParserConfigurationException;
-import net.juniper.netconf.Device;
-import net.juniper.netconf.NetconfException;
-import net.juniper.netconf.XML;
-import org.xml.sax.SAXException;
 
 public class parse_system_info {
-     public static void main(String args[]) throws NetconfException, 
-              ParserConfigurationException, SAXException, IOException {
-        
-        //Create device
-        Device device = new Device("hostname","username","passwd",null);
+     public static void main(String[] args) throws
+             SAXException, IOException {
+
+        Device device = CreateDevice.createDevice();
         device.connect();
         
         //Send RPC and receive RPC Reply as XML
