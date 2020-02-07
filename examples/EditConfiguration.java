@@ -6,22 +6,22 @@
  *
  */
 
-import java.io.IOException;
-import javax.xml.parsers.ParserConfigurationException;
 import net.juniper.netconf.CommitException;
-import net.juniper.netconf.LoadException;
-import net.juniper.netconf.NetconfException;
-import org.xml.sax.SAXException;
-
 import net.juniper.netconf.Device;
+import net.juniper.netconf.LoadException;
 import net.juniper.netconf.XML;
 import net.juniper.netconf.XMLBuilder;
+import org.xml.sax.SAXException;
+
+import javax.xml.parsers.ParserConfigurationException;
+import java.io.IOException;
 
 
 public class EditConfiguration {
-    public static void main(String[] args) throws LoadException, IOException, 
-            NetconfException, ParserConfigurationException, SAXException {
-        
+    public static void main(String[] args) throws IOException,
+            ParserConfigurationException, SAXException {
+
+
         /*Build the XML configuration
          *The XML configuration required is:
          *
@@ -36,9 +36,8 @@ public class EditConfiguration {
          XMLBuilder builder = new XMLBuilder();
          XML ftp_config = builder.createNewConfig("system", "services", "ftp");
 
-         //Create the device
-         Device device = new Device("hostname","user","PaSsWoRd",null);
-         device.connect();
+        Device device = CreateDevice.createDevice();
+        device.connect();
 
          //Lock the configuration first
          boolean isLocked = device.lockConfig();
@@ -51,15 +50,12 @@ public class EditConfiguration {
          try {
              device.loadXMLConfiguration(ftp_config.toString(), "merge");
              device.commit();
-         } catch(LoadException e) {
-             System.out.println(e.getMessage());
-             return;
-         } catch(CommitException e) {
+         } catch(LoadException | CommitException e) {
              System.out.println(e.getMessage());
              return;
          }
 
-         //Unlock the configuration and close the device.
+        //Unlock the configuration and close the device.
          device.unlockConfig();
          device.close();
     }
