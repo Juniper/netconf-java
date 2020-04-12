@@ -5,6 +5,9 @@ package net.juniper.netconf;
  */
 public class NetconfConstants {
 
+    private NetconfConstants() {
+    }
+
     /**
      * Device prompt for the framing protocol.
      * https://tools.ietf.org/html/rfc6242#section-4.1
@@ -27,5 +30,9 @@ public class NetconfConstants {
      * https://tools.ietf.org/html/rfc6241#section-8.1
      */
     public static final String URN_IETF_PARAMS_NETCONF_BASE_1_0 = "urn:ietf:params:netconf:base:1.0";
+
+    public final static int GRANULARITY = 100;
+    public static final String EMPTY_LINE = "";
+    public static final String LF = "\n";
 
 }

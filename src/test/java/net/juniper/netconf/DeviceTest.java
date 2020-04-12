@@ -34,7 +34,8 @@ public class DeviceTest {
         assertThat(device.getUserName()).isEqualTo(TEST_USERNAME);
         assertThat(device.getPassword()).isEqualTo(TEST_PASSWORD);
         assertThat(device.getPort()).isEqualTo(DEFAULT_NETCONF_PORT);
-        assertThat(device.getTimeout()).isEqualTo(DEFAULT_TIMEOUT);
+        assertThat(device.getConnectionTimeout()).isEqualTo(DEFAULT_TIMEOUT);
+        assertThat(device.getCommandTimeout()).isEqualTo(DEFAULT_TIMEOUT);
         assertFalse(device.isKeyBasedAuthentication());
         assertNull(device.getPemKeyFile());
         assertNull(device.getHostKeysFileName());

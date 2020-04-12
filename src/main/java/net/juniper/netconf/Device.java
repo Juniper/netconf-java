@@ -62,7 +62,8 @@ public class Device {
 
     private String hostName;
     private int port;
-    private int timeout;
+    private int connectionTimeout;
+    private int commandTimeout;
 
     private String userName;
     private String password;
@@ -88,6 +89,8 @@ public class Device {
             @NonNull String hostName,
             Integer port,
             Integer timeout,
+            Integer connectionTimeout,
+            Integer commandTimeout,
             @NonNull String userName,
             String password,
             Boolean keyBasedAuthentication,
@@ -98,7 +101,9 @@ public class Device {
     ) throws NetconfException {
         this.hostName = hostName;
         this.port = (port != null) ? port : DEFAULT_NETCONF_PORT;
-        this.timeout = (timeout != null) ? timeout : DEFAULT_TIMEOUT;
+        Integer commonTimeout =   (timeout != null) ? timeout : DEFAULT_TIMEOUT;
+        this.connectionTimeout = (connectionTimeout != null) ? connectionTimeout : commonTimeout;
+        this.commandTimeout = (commandTimeout != null) ? commandTimeout : commonTimeout;
 
         this.userName = userName;
         this.password = password;
@@ -198,13 +203,13 @@ public class Device {
             sshClient.setHostKeyRepository(sshClient.getHostKeyRepository());
             log.info("Connecting to host {} on port {}.", hostName, port);
             if (keyBasedAuthentication) {
-                sshSession = loginWithPrivateKey(timeout);
+                sshSession = loginWithPrivateKey(connectionTimeout);
                 loadPrivateKey();
             } else {
-                sshSession = loginWithUserPass(timeout);
+                sshSession = loginWithUserPass(connectionTimeout);
             }
             try {
-                sshSession.setTimeout(timeout);
+                sshSession.setTimeout(connectionTimeout);
             } catch (JSchException e) {
                 throw new NetconfException(String.format("Error setting session timeout: %s", e.getMessage()));
             }
@@ -217,7 +222,7 @@ public class Device {
         try {
             sshChannel = (ChannelSubsystem) sshSession.openChannel("subsystem");
             sshChannel.setSubsystem("netconf");
-            return new NetconfSession(sshChannel, timeout, helloRpc, builder);
+            return new NetconfSession(sshChannel, connectionTimeout, commandTimeout, helloRpc, builder);
         } catch (JSchException | IOException e) {
             throw new NetconfException("Failed to create Netconf session:" +
                     e.getMessage());
@@ -350,9 +355,9 @@ public class Device {
                 } catch (Exception e) {
                     throw new NetconfException(e.getMessage());
                 }
-                if (line == null || line.equals(""))
+                if (line == null || line.equals(NetconfConstants.EMPTY_LINE))
                     break;
-                reply.append(line).append("\n");
+                reply.append(line).append(NetconfConstants.LF);
             }
             return reply.toString();
         } finally {
