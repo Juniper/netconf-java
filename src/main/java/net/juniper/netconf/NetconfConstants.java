@@ -31,7 +31,6 @@ public class NetconfConstants {
      */
     public static final String URN_IETF_PARAMS_NETCONF_BASE_1_0 = "urn:ietf:params:netconf:base:1.0";
 
-    public final static int GRANULARITY = 100;
     public static final String EMPTY_LINE = "";
     public static final String LF = "\n";
 

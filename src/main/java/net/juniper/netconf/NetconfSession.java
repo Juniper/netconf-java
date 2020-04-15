@@ -62,10 +62,12 @@ public class NetconfSession {
 
     private String lastRpcReply;
     private final DocumentBuilder builder;
-    private int messageId = 0;
-    private int commandTimeout;
+    private final int commandTimeout;
+    private final int pauseTimeout;
 
-    public static final int BUFFER_SIZE = 8 * 1024;
+    private int messageId = 0;
+    // Bigger than inner buffer in BufferReader class
+    public static final int BUFFER_SIZE = 9 * 1024;
 
     private static final String CANDIDATE_CONFIG = "candidate";
     private static final String EMPTY_CONFIGURATION_TAG = "<configuration></configuration>";
@@ -91,6 +93,7 @@ public class NetconfSession {
         }
         this.netconfChannel = netconfChannel;
         this.commandTimeout = commandTimeout;
+        this.pauseTimeout = 5;
         this.builder = builder;
 
         sendHello(hello);
@@ -130,7 +133,7 @@ public class NetconfSession {
                 rpcReply.append(buffer, 0, charsRead);
             } else {
                 try {
-                    Thread.sleep(commandTimeout / NetconfConstants.GRANULARITY);
+                    Thread.sleep(pauseTimeout);
                 } catch (InterruptedException ex) {
                     log.error("InterruptedException ex=", ex);
                 }
