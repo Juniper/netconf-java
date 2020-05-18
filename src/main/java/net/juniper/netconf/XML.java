@@ -26,6 +26,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
+import static net.juniper.netconf.NetconfConstants.LF;
+
 /**
  * An <code>XML</code> object represents XML content and provides methods to
  * manipulate it.
@@ -52,10 +54,10 @@ public class XML {
 
     private String trim(String str) {
         String st = str.trim();
-        if (st.startsWith("\n"))
-            st = st.substring(st.indexOf("\n") +1);
-        if (st.endsWith("\n")) {
-            st = st.substring(0,st.lastIndexOf("\n"));
+        if (st.startsWith(LF))
+            st = st.substring(st.indexOf(LF) + 1);
+        if (st.endsWith(LF)) {
+            st = st.substring(0, st.lastIndexOf(LF));
         }
         return st;
     }

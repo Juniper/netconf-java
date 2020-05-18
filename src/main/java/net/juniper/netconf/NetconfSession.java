@@ -27,11 +27,13 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.StringReader;
+import java.net.SocketTimeoutException;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 /**
  * A <code>NetconfSession</code> object is used to call the Netconf driver
@@ -60,7 +62,12 @@ public class NetconfSession {
 
     private String lastRpcReply;
     private final DocumentBuilder builder;
+    private final int commandTimeout;
+    private final int pauseTimeout;
+
     private int messageId = 0;
+    // Bigger than inner buffer in BufferReader class
+    public static final int BUFFER_SIZE = 9 * 1024;
 
     private static final String CANDIDATE_CONFIG = "candidate";
     private static final String EMPTY_CONFIGURATION_TAG = "<configuration></configuration>";
@@ -69,16 +76,24 @@ public class NetconfSession {
 
     NetconfSession(Channel netconfChannel, int timeout, String hello,
                    DocumentBuilder builder) throws IOException {
+        this(netconfChannel, timeout, timeout, hello, builder);
+    }
+
+    NetconfSession(Channel netconfChannel, int connectionTimeout, int commandTimeout,
+                   String hello,
+                   DocumentBuilder builder) throws IOException {
 
         stdInStreamFromDevice = netconfChannel.getInputStream();
         stdOutStreamToDevice = netconfChannel.getOutputStream();
         try {
-            netconfChannel.connect(timeout);
+            netconfChannel.connect(connectionTimeout);
         } catch (JSchException e) {
             throw new NetconfException("Failed to create Netconf session:" +
                     e.getMessage());
         }
         this.netconfChannel = netconfChannel;
+        this.commandTimeout = commandTimeout;
+        this.pauseTimeout = 5;
         this.builder = builder;
 
         sendHello(hello);
@@ -103,20 +118,33 @@ public class NetconfSession {
     String getRpcReply(String rpc) throws IOException {
         // write the rpc to the device
         BufferedReader bufferedReader = getRpcReplyRunning(rpc);
-
         // reading the rpc reply from the device
+        char[] buffer = new char[BUFFER_SIZE];
+        boolean timeoutNotExceeded = true;
         StringBuilder rpcReply = new StringBuilder();
-        while (!rpcReply.toString().contains(NetconfConstants.DEVICE_PROMPT)) {
-            int line = bufferedReader.read();
-            if (line == -1) {
-                throw new NetconfException("Input Stream has been closed during reading.");
+        final long startTime = System.nanoTime();
+        while ((rpcReply.indexOf(NetconfConstants.DEVICE_PROMPT) < 0) &&
+                (timeoutNotExceeded = (TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startTime) < commandTimeout))) {
+            if (bufferedReader.ready()) {
+                int charsRead = bufferedReader.read(buffer);
+                if (charsRead == -1) {
+                    throw new NetconfException("Input Stream has been closed during reading.");
+                }
+                rpcReply.append(buffer, 0, charsRead);
+            } else {
+                try {
+                    Thread.sleep(pauseTimeout);
+                } catch (InterruptedException ex) {
+                    log.error("InterruptedException ex=", ex);
+                }
             }
-            rpcReply.append((char) line);
         }
-
+        if (!timeoutNotExceeded)
+            throw new SocketTimeoutException("Command timeout limit was exceeded: " + commandTimeout);
         // fixing the rpc reply by removing device prompt
-        String reply = rpcReply.toString().replace(NetconfConstants.DEVICE_PROMPT, "");
-        log.debug("Received Netconf RPC-Reply\n{}", reply);
+        log.debug("Received Netconf RPC-Reply\n{}", rpcReply);
+        String reply = rpcReply.toString().replace(NetconfConstants.DEVICE_PROMPT, NetconfConstants.EMPTY_LINE);
+
         return reply;
     }
 
@@ -231,7 +259,7 @@ public class NetconfSession {
     private String getConfig(String target, String configTree)
             throws IOException {
 
-        String rpc = "" + "<rpc>" +
+        String rpc = "<rpc>" +
                 "<get-config>" +
                 "<source>" +
                 "<" + target + "/>" +

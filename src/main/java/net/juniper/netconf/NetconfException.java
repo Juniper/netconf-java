@@ -14,7 +14,7 @@ import java.io.IOException;
  * Describes exceptions related to establishing Netconf session.
  */
 public class NetconfException extends IOException {
-    NetconfException(String msg) {
+    public NetconfException(String msg) {
         super(msg);
     }
 }
