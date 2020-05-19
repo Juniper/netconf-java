@@ -18,3 +18,5 @@ gradle/
 libraries/
 gradlew
 gradlew.bat
+
+logs/
