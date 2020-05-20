@@ -55,7 +55,7 @@ import java.util.List;
  */
 @Slf4j
 @Getter
-public class Device {
+public class Device implements AutoCloseable {
 
     private static final int DEFAULT_NETCONF_PORT = 830;
     private static final int DEFAULT_TIMEOUT = 5000;
@@ -315,6 +315,7 @@ public class Device {
      * sessions will be closed, too. Can be called at any time. Don't forget to
      * call this once you don't need the device anymore.
      */
+    @Override
     public void close() {
         if (!isConnected()) {
             return;

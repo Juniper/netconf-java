@@ -16,9 +16,33 @@
         <jar.main.class>net.juniper.netconf</jar.main.class>
     </properties>
 
-    <build>
-        <sourceDirectory>src/main/java</sourceDirectory>
+    <name>${project.groupId}:${project.artifactId}</name>
+    <description>An API For NetConf client</description>
+    <url>https://github.com/Juniper/netconf-java</url>
 
+    <licenses>
+        <license>
+            <name>BSD 2</name>
+            <url>https://opensource.org/licenses/BSD-2-Clause</url>
+        </license>
+    </licenses>
+
+    <developers>
+        <developer>
+            <name>Juniper Staff</name>
+            <email>ldo@juniper.net</email>
+            <organization>Juniper</organization>
+            <organizationUrl>https://github.com/Juniper</organizationUrl>
+        </developer>
+    </developers>
+
+    <scm>
+        <connection>scm:git:git://github.com/Juniper/netconf-java.git</connection>
+        <developerConnection>scm:git:ssh://github.com:Juniper/netconf-java.git</developerConnection>
+        <url>https://github.com/Juniper/netconf-java/tree/master</url>
+    </scm>
+
+    <build>
         <plugins>
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>
@@ -59,21 +83,48 @@
                     <target>1.8</target>
                 </configuration>
             </plugin>
-
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-source-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>attach-sources</id>
+                        <goals>
+                            <goal>jar-no-fork</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-javadoc-plugin</artifactId>
-                <version>3.1.0</version>
-                <configuration>
-                    <show>private</show>
-                    <nohelp>true</nohelp>
-                    <reportOutputDirectory>${basedir}</reportOutputDirectory>
-                    <destDir>javadoc</destDir>
-                    <stylesheet>java</stylesheet>
-                    <bottom><![CDATA[Copyright 2018, <a href="https://www.juniper.net">Juniper Networks, Inc.<a>]]> </bottom>
-                </configuration>
+                <executions>
+                    <execution>
+                        <id>attach-javadocs</id>
+                        <goals>
+                            <goal>jar</goal>
+                        </goals>
+                        <configuration>
+                            <stylesheet>java</stylesheet>
+                            <bottom><![CDATA[Copyright 2018, <a href="https://www.juniper.net">Juniper Networks, Inc.<a>]]> </bottom>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>javadoc</id>
+                        <goals>
+                            <goal>javadoc</goal>
+                        </goals>
+                        <configuration>
+                            <show>private</show>
+                            <nohelp>true</nohelp>
+                            <reportOutputDirectory>${basedir}</reportOutputDirectory>
+                            <destDir>javadoc</destDir>
+                            <stylesheet>java</stylesheet>
+                            <bottom><![CDATA[Copyright 2018, <a href="https://www.juniper.net">Juniper Networks, Inc.<a>]]> </bottom>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
-
         </plugins>
     </build>
 
@@ -104,7 +155,7 @@
         </dependency>
         <dependency>
             <groupId>org.slf4j</groupId>
-            <artifactId>slf4j-simple</artifactId>
+            <artifactId>slf4j-log4j12</artifactId>
             <version>1.7.12</version>
         </dependency>
 
