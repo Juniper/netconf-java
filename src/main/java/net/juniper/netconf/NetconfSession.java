@@ -123,8 +123,8 @@ public class NetconfSession {
         boolean timeoutNotExceeded = true;
         StringBuilder rpcReply = new StringBuilder();
         final long startTime = System.nanoTime();
-        while ((rpcReply.indexOf(NetconfConstants.DEVICE_PROMPT) < 0) &&
-                (timeoutNotExceeded = (TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startTime) < commandTimeout))) {
+        while ((rpcReply.indexOf(NetconfConstants.DEVICE_PROMPT) < 0) && (commandTimeout == 0 ||
+                (timeoutNotExceeded = (TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startTime) < commandTimeout)))) {
             if (bufferedReader.ready()) {
                 int charsRead = bufferedReader.read(buffer);
                 if (charsRead == -1) {
@@ -139,7 +139,7 @@ public class NetconfSession {
                 }
             }
         }
-        if (!timeoutNotExceeded)
+        if (commandTimeout != 0 && !timeoutNotExceeded)
             throw new SocketTimeoutException("Command timeout limit was exceeded: " + commandTimeout);
         // fixing the rpc reply by removing device prompt
         log.debug("Received Netconf RPC-Reply\n{}", rpcReply);
