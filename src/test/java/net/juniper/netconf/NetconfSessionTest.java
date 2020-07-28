@@ -1,6 +1,5 @@
 package net.juniper.netconf;
 
-
 import com.jcraft.jsch.Channel;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.Before;
@@ -13,6 +12,7 @@ import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
 import java.io.BufferedOutputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
@@ -136,7 +136,7 @@ public class NetconfSessionTest {
 
         Thread thread = new Thread(() -> {
             try {
-                outPipe.write("Go to HELL".getBytes());
+                outPipe.write(FAKE_RPC_REPLY.getBytes());
                 outPipe.write(DEVICE_PROMPT_BYTE);
                 outPipe.flush();
                 Thread.sleep(800);
