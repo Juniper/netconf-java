@@ -20,3 +20,7 @@ gradlew
 gradlew.bat
 
 logs/
+
+.DS_Store
+.factorypath
+settings.json

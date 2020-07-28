@@ -9,6 +9,7 @@
 package net.juniper.netconf;
 
 import com.google.common.base.Preconditions;
+import org.apache.xml.serializer.OutputPropertiesFactory;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
@@ -506,6 +507,7 @@ public class XML {
             TransformerFactory transFactory = TransformerFactory.newInstance();
             Transformer transformer = transFactory.newTransformer();
             StringWriter buffer = new StringWriter();
+            transformer.setOutputProperty(OutputPropertiesFactory.S_KEY_LINE_SEPARATOR, "\n");
             transformer.setOutputProperty(OutputKeys.OMIT_XML_DECLARATION, "yes");
             transformer.setOutputProperty(OutputKeys.INDENT, "yes");
             transformer.setOutputProperty

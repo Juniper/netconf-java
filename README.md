@@ -13,67 +13,87 @@ REQUIREMENTS
 ============
 
 [OpenJDK 8](http://openjdk.java.net/projects/jdk8/) or Java 8
+[Maven](https://maven.apache.org/download.cgi) if you want to build using `mvn` [Supported from v2.1.1].
 
 Releases
 ========
-Latest .jar file in release section contains netconf-java compiled from Java SE 8u65.
-If user wants to use some other java version, then download the source code and compile it with desired version.
+Releases contain source code only. Due to changing JDK licensing, jar files are not released.
+User may download the source code and compile it with desired JDK version.
+
+* Instructions to build
+  * Download Source Code for the required release
+  * Compile the code and build the jar using your chosen JDK version
+  * Use the jar file
+
+* Instructions to build using `mvn`
+  * Download Source Code for the required release
+  * Compile the code and build the jar using `mvn package`
+  * Use the jar file from (source to netconf-java)/netconf-java/target
+
+v2.1.1
+------
+
+* Fixed `mvn` build issues
 
 v2.0.0
 ------
+
 * Replaced the ssh library with [JSch](http://www.jcraft.com/jsch/)
-    * Adds support for new ssh crypto algorithms
-    * More modern ssh implementation
+  * Adds support for new ssh crypto algorithms
+  * More modern ssh implementation
 * Added support for importing and building the library with maven
 * Added FindBugs code testing to maven build
 
 This is a breaking change to the API. New Device objects are now created using a builder.
 Example:
-```
+
+```Java
 Device device = Device.builder().hostName("hostname")
     .userName("username")
     .password("password")
     .hostKeysFileName("hostKeysFileName")
-    .build();    
+    .build();
 ```
 
 SYNOPSIS
 ========
 
-    import java.io.IOException;
-    import javax.xml.parsers.ParserConfigurationException;
-    import net.juniper.netconf.NetconfException;
-    import org.xml.sax.SAXException;
+```Java
+import java.io.IOException;
+import javax.xml.parsers.ParserConfigurationException;
+import net.juniper.netconf.NetconfException;
+import org.xml.sax.SAXException;
 
-    import net.juniper.netconf.XML;
-    import net.juniper.netconf.Device;
+import net.juniper.netconf.XML;
+import net.juniper.netconf.Device;
 
-    public class ShowInterfaces {
-        public static void main(String args[]) throws NetconfException,
-                  ParserConfigurationException, SAXException, IOException {
+public class ShowInterfaces {
+    public static void main(String args[]) throws NetconfException,
+                ParserConfigurationException, SAXException, IOException {
 
-            //Create device
-            Device device = Device.builder()
-                                .hostName("hostname")
-                                .userName("username")
-                                .password("password")
-                                .hostKeysFileName("hostKeysFileName")
-                                .build(); 
-            device.connect();
+        //Create device
+        Device device = Device.builder()
+                            .hostName("hostname")
+                            .userName("username")
+                            .password("password")
+                            .hostKeysFileName("hostKeysFileName")
+                            .build(); 
+        device.connect();
 
-            //Send RPC and receive RPC Reply as XML
-            XML rpc_reply = device.executeRPC("get-interface-information");
-            /* OR
-             * device.executeRPC("<get-interface-information/>");
-             * OR
-             * device.executeRPC("<rpc><get-interface-information/></rpc>");
-             */
+        //Send RPC and receive RPC Reply as XML
+        XML rpc_reply = device.executeRPC("get-interface-information");
+        /* OR
+            * device.executeRPC("<get-interface-information/>");
+            * OR
+            * device.executeRPC("<rpc><get-interface-information/></rpc>");
+            */
 
-            //Print the RPC-Reply and close the device.
-            System.out.println(rpc_reply);
-            device.close();
-        }
+        //Print the RPC-Reply and close the device.
+        System.out.println(rpc_reply);
+        device.close();
     }
+}
+```
 
 LICENSE
 =======
