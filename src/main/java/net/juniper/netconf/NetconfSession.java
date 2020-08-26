@@ -14,6 +14,7 @@ import com.jcraft.jsch.Channel;
 import com.jcraft.jsch.JSchException;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
+import org.w3c.dom.Attr;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.xml.sax.InputSource;
@@ -31,8 +32,7 @@ import java.net.SocketTimeoutException;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -64,6 +64,8 @@ public class NetconfSession {
     private final DocumentBuilder builder;
     private final int commandTimeout;
     private final int pauseTimeout;
+
+    private final HashMap<String, String> rpcAttributes = new HashMap<>();
 
     private int messageId = 0;
     // Bigger than inner buffer in BufferReader class
@@ -151,7 +153,20 @@ public class NetconfSession {
     private BufferedReader getRpcReplyRunning(String rpc) throws IOException {
         // RFC conformance for XML type, namespaces and message ids for RPCs
         messageId++;
-        rpc = rpc.replace("<rpc>", "<rpc xmlns=\"" + NetconfConstants.URN_XML_NS_NETCONF_BASE_1_0 + "\" message-id=\"" + messageId + "\">").trim();
+        if(rpcAttributes.isEmpty())
+            rpc = rpc.replace("<rpc>", "<rpc xmlns=\"" + NetconfConstants.URN_XML_NS_NETCONF_BASE_1_0 + "\" message-id=\"" + messageId + "\">").trim();
+        else {
+            StringBuilder attributes = new StringBuilder();
+            boolean defaultNamespaceSet = false;
+            for (Map.Entry<String, String> attribute : rpcAttributes.entrySet()) {
+                attributes.append(String.format(" %1s=\"%2s\"", attribute.getKey(), attribute.getValue()));
+                if (attribute.getKey().equals("xmlns"))
+                    defaultNamespaceSet = true;
+            }
+            if (!defaultNamespaceSet)
+                attributes.append(" xmlns=\""+NetconfConstants.URN_XML_NS_NETCONF_BASE_1_0+"\"");
+            rpc = rpc.replace("<rpc>", "<rpc " + attributes + " message-id=\"" + messageId + "\">").trim();
+        }
         if (!rpc.contains(NetconfConstants.XML_VERSION)) {
             rpc = NetconfConstants.XML_VERSION + rpc;
         }
@@ -911,4 +926,32 @@ public class NetconfSession {
         return this.lastRpcReply;
     }
 
+    /**
+     * Adds an Attribute to the set of RPC attributes used in the RPC XML envelope.
+     *
+     * @param name The attribute name for the new attribute.
+     * @param value The attribute value for the new attribute.
+     */
+    public void addRPCAttribute(String name, String value) {
+        rpcAttributes.put(name, value);
+    }
+
+    /**
+     * Removes an attribute from the set of RPC attributes used in the RPC XML envelope.
+     *
+     * @param name The attribute name to be removed.
+     *
+     * @return The value of the removed attribute.
+     */
+    public String removeRPCAttribute (String name) {
+        return rpcAttributes.remove(name);
+    }
+
+    /**
+     * Clears all the RPC attributes from the set of RPC attributes used in the RPC XML envelope. The set will be empty
+     * after this call returns.
+     */
+    public void removeAllRPCAttributes() {
+        rpcAttributes.clear();
+    }
 }
