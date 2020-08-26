@@ -997,4 +997,3 @@ public class Device implements AutoCloseable {
     }
 
 }
-
