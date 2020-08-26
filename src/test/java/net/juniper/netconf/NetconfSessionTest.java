@@ -12,7 +12,6 @@ import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
 import java.io.BufferedOutputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
@@ -93,6 +92,29 @@ public class NetconfSessionTest {
         Thread thread = new Thread(() -> {
             try {
                 outPipe.write(FAKE_RPC_REPLY.getBytes());
+                for (int i = 0; i < 7; i++) {
+                    outPipe.write(FAKE_RPC_REPLY.getBytes());
+                    Thread.sleep(200);
+                    outPipe.flush();
+                }
+                Thread.sleep(200);
+                outPipe.close();
+            } catch (IOException | InterruptedException e) {
+                log.error("error =", e);
+            }
+        });
+        thread.start();
+
+        assertThatThrownBy(() -> createNetconfSession(1000))
+                .isInstanceOf(SocketTimeoutException.class)
+                .hasMessage("Command timeout limit was exceeded: 1000");
+    }
+
+    @Test
+    public void GIVEN_createSession_WHEN_connectionClose_THEN_throwSocketTimeoutException() throws Exception {
+        Thread thread = new Thread(() -> {
+            try {
+                outPipe.write(FAKE_RPC_REPLY.getBytes());
                 Thread.sleep(200);
                 outPipe.flush();
                 Thread.sleep(200);
@@ -103,9 +125,9 @@ public class NetconfSessionTest {
         });
         thread.start();
 
-        assertThatThrownBy(() -> createNetconfSession())
-                .isInstanceOf(SocketTimeoutException.class)
-                .hasMessage("Command timeout limit was exceeded: 5000");
+        assertThatThrownBy(() -> createNetconfSession(COMMAND_TIMEOUT))
+                .isInstanceOf(NetconfException.class)
+                .hasMessage("Input Stream has been closed during reading.");
     }
 
     @Test
@@ -127,7 +149,7 @@ public class NetconfSessionTest {
         });
         thread.start();
 
-        createNetconfSession();
+        createNetconfSession(COMMAND_TIMEOUT);
     }
 
     @Test
@@ -153,7 +175,7 @@ public class NetconfSessionTest {
         });
         thread.start();
 
-        NetconfSession netconfSession = createNetconfSession();
+        NetconfSession netconfSession = createNetconfSession(COMMAND_TIMEOUT);
         Thread.sleep(200);
         String deviceResponse = netconfSession.executeRPC(TestConstants.LLDP_REQUEST).toString();
 
@@ -196,7 +218,7 @@ public class NetconfSessionTest {
                 .hasMessage("Null RPC");
     }
 
-    private NetconfSession createNetconfSession() throws IOException {
+    private NetconfSession createNetconfSession(int commandTimeout) throws IOException {
         DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
         try {
             builder = factory.newDocumentBuilder();
@@ -204,6 +226,6 @@ public class NetconfSessionTest {
             throw new NetconfException(String.format("Error creating XML Parser: %s", e.getMessage()));
         }
 
-        return new NetconfSession(mockChannel, CONNECTION_TIMEOUT, COMMAND_TIMEOUT, FAKE_HELLO, builder);
+        return new NetconfSession(mockChannel, CONNECTION_TIMEOUT, commandTimeout, FAKE_HELLO, builder);
     }
 }
