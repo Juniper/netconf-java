@@ -16,6 +16,7 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
+import org.w3c.dom.Attr;
 import org.w3c.dom.Document;
 import org.xml.sax.SAXException;
 
@@ -963,5 +964,36 @@ public class Device implements AutoCloseable {
         return this.netconfSession.getLastRPCReply();
     }
 
-}
+    /**
+     * Creates a new RPC attribute for use in the default rpc xml envelope used in all rpc executions. Setting
+     * the "xmlns" attribute will override the default namespace attribute, otherwise the value in
+     * NetconfConstants.URN_XML_NS_NETCONF_BASE_1_0 will be used as the default namespace.
+     *
+     * @param name The name of the new RPC attribute.
+     * @param value The value of the new RPC attribute.
+     * @throws NullPointerException If the device connection has not been made yet.
+     */
+    public void createRPCAttribute(String name, String value) {
+        this.netconfSession.addRPCAttribute(name, value);
+    }
 
+    /**
+     * Removes an RPC attribute from the default rpc xml envelope used in all rpc executions.
+     *
+     * @return The value of the removed attribute.
+     * @throws NullPointerException If the device connection has not been made yet.
+     */
+    public String removeRPCAttribute(String name) {
+        return this.netconfSession.removeRPCAttribute(name);
+    }
+
+    /**
+     * Clears all the RPC attributes from the default rpc xml envelope used in all rpc executions. The default namespace
+     * value NetconfConstants.URN_XML_NS_NETCONF_BASE_1_0 will still be present in the xml envelope.
+     */
+    public void clearRPCAttributes() {
+        if(this.netconfSession != null)
+            this.netconfSession.removeAllRPCAttributes();
+    }
+
+}

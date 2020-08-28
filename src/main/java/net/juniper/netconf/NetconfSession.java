@@ -32,7 +32,9 @@ import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -64,6 +66,9 @@ public class NetconfSession {
     private final DocumentBuilder builder;
     private final int commandTimeout;
     private final int pauseTimeout;
+
+    private final Map<String, String> rpcAttrMap = new HashMap<>();
+    private String rpcAttributes;
 
     private int messageId = 0;
     // Bigger than inner buffer in BufferReader class
@@ -151,17 +156,38 @@ public class NetconfSession {
     private BufferedReader getRpcReplyRunning(String rpc) throws IOException {
         // RFC conformance for XML type, namespaces and message ids for RPCs
         messageId++;
-        rpc = rpc.replace("<rpc>", "<rpc xmlns=\"" + NetconfConstants.URN_XML_NS_NETCONF_BASE_1_0 + "\" message-id=\"" + messageId + "\">").trim();
+        rpc = rpc.replace("<rpc>", "<rpc" + getRpcAttributes() + " message-id=\"" + messageId + "\">").trim();
         if (!rpc.contains(NetconfConstants.XML_VERSION)) {
             rpc = NetconfConstants.XML_VERSION + rpc;
         }
-
         // writing the rpc to the device
         log.debug("Sending Netconf RPC\n{}", rpc);
         stdOutStreamToDevice.write(rpc.getBytes(Charsets.UTF_8));
         stdOutStreamToDevice.flush();
         return new BufferedReader(
                 new InputStreamReader(stdInStreamFromDevice, Charsets.UTF_8));
+    }
+
+    /**
+     * Gets the current rpc attribute string. If the rpc attribute string is not yet generated or has been reset then
+     * we generate rpc attributes from the RPC Attribute Map.
+     *
+     * @return The attribute set XML formatted into a string.
+     */
+    public String getRpcAttributes() {
+        if(rpcAttributes == null) {
+            StringBuilder attributes = new StringBuilder();
+            boolean useDefaultNamespace = true;
+            for (Map.Entry<String, String> attribute : rpcAttrMap.entrySet()) {
+                attributes.append(String.format(" %1s=\"%2s\"", attribute.getKey(), attribute.getValue()));
+                if ("xmlns".equals(attribute.getKey()))
+                    useDefaultNamespace = false;
+            }
+            if (useDefaultNamespace)
+                attributes.append(" xmlns=\"" + NetconfConstants.URN_XML_NS_NETCONF_BASE_1_0 + "\"");
+            rpcAttributes = attributes.toString();
+        }
+        return rpcAttributes;
     }
 
 
@@ -911,4 +937,37 @@ public class NetconfSession {
         return this.lastRpcReply;
     }
 
+    /**
+     * Adds an Attribute to the set of RPC attributes used in the RPC XML envelope. Resets the rpcAttributes value
+     * to null for generation on the next request.
+     *
+     * @param name The attribute name for the new attribute.
+     * @param value The attribute value for the new attribute.
+     */
+    public void addRPCAttribute(String name, String value) {
+        rpcAttrMap.put(name, value);
+        rpcAttributes = null;
+    }
+
+    /**
+     * Removes an attribute from the set of RPC attributes used in the RPC XML envelope. Resets the rpcAttributes value
+     * to null for generation on the next request.
+     *
+     * @param name The attribute name to be removed.
+     *
+     * @return The value of the removed attribute.
+     */
+    public String removeRPCAttribute (String name) {
+        rpcAttributes = null;
+        return rpcAttrMap.remove(name);
+    }
+
+    /**
+     * Clears all the RPC attributes from the set of RPC attributes used in the RPC XML envelope. The set will be empty
+     * after this call returns. Resets the rpcAttributes value to null for generation on the next request.
+     */
+    public void removeAllRPCAttributes() {
+        rpcAttrMap.clear();
+        rpcAttributes = null;
+    }
 }
