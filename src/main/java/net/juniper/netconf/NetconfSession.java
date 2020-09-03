@@ -26,6 +26,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.io.Reader;
 import java.io.StringReader;
 import java.net.SocketTimeoutException;
 import java.nio.charset.Charset;
@@ -65,7 +66,6 @@ public class NetconfSession {
     private String lastRpcReply;
     private final DocumentBuilder builder;
     private final int commandTimeout;
-    private final int pauseTimeout;
 
     private final Map<String, String> rpcAttrMap = new HashMap<>();
     private String rpcAttributes;
@@ -98,7 +98,6 @@ public class NetconfSession {
         }
         this.netconfChannel = netconfChannel;
         this.commandTimeout = commandTimeout;
-        this.pauseTimeout = 5;
         this.builder = builder;
 
         sendHello(hello);
@@ -122,38 +121,37 @@ public class NetconfSession {
     @VisibleForTesting
     String getRpcReply(String rpc) throws IOException {
         // write the rpc to the device
-        BufferedReader bufferedReader = getRpcReplyRunning(rpc);
-        // reading the rpc reply from the device
-        char[] buffer = new char[BUFFER_SIZE];
-        boolean timeoutNotExceeded = true;
-        StringBuilder rpcReply = new StringBuilder();
+        sendRpcRequest(rpc);
+
+        final char[] buffer = new char[BUFFER_SIZE];
+        final StringBuilder rpcReply = new StringBuilder();
         final long startTime = System.nanoTime();
-        while ((rpcReply.indexOf(NetconfConstants.DEVICE_PROMPT) < 0) &&
+        final Reader in = new InputStreamReader(stdInStreamFromDevice, Charsets.UTF_8);
+        boolean timeoutNotExceeded = true;
+        int promptPosition = -1;
+        while ((promptPosition = rpcReply.indexOf(NetconfConstants.DEVICE_PROMPT)) < 0 &&
                 (timeoutNotExceeded = (TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startTime) < commandTimeout))) {
-            if (bufferedReader.ready()) {
-                int charsRead = bufferedReader.read(buffer);
-                if (charsRead == -1) {
-                    throw new NetconfException("Input Stream has been closed during reading.");
-                }
-                rpcReply.append(buffer, 0, charsRead);
-            } else {
-                try {
-                    Thread.sleep(pauseTimeout);
-                } catch (InterruptedException ex) {
-                    log.error("InterruptedException ex=", ex);
-                }
-            }
+            int charsRead = in.read(buffer, 0, buffer.length);
+            if (charsRead < 0) throw new NetconfException("Input Stream has been closed during reading.");
+            rpcReply.append(buffer, 0, charsRead);
         }
+
         if (!timeoutNotExceeded)
             throw new SocketTimeoutException("Command timeout limit was exceeded: " + commandTimeout);
         // fixing the rpc reply by removing device prompt
         log.debug("Received Netconf RPC-Reply\n{}", rpcReply);
-        String reply = rpcReply.toString().replace(NetconfConstants.DEVICE_PROMPT, NetconfConstants.EMPTY_LINE);
+        rpcReply.setLength(promptPosition);
 
-        return reply;
+        return rpcReply.toString();
     }
 
     private BufferedReader getRpcReplyRunning(String rpc) throws IOException {
+        sendRpcRequest(rpc);
+        return new BufferedReader(
+                new InputStreamReader(stdInStreamFromDevice, Charsets.UTF_8));
+    }
+
+    private void sendRpcRequest(String rpc) throws IOException {
         // RFC conformance for XML type, namespaces and message ids for RPCs
         messageId++;
         rpc = rpc.replace("<rpc>", "<rpc" + getRpcAttributes() + " message-id=\"" + messageId + "\">").trim();
@@ -164,8 +162,6 @@ public class NetconfSession {
         log.debug("Sending Netconf RPC\n{}", rpc);
         stdOutStreamToDevice.write(rpc.getBytes(Charsets.UTF_8));
         stdOutStreamToDevice.flush();
-        return new BufferedReader(
-                new InputStreamReader(stdInStreamFromDevice, Charsets.UTF_8));
     }
 
     /**
