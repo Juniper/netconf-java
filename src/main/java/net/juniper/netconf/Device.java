@@ -16,7 +16,6 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
-import org.w3c.dom.Attr;
 import org.w3c.dom.Document;
 import org.xml.sax.SAXException;
 
@@ -61,48 +60,47 @@ public class Device implements AutoCloseable {
     private static final int DEFAULT_NETCONF_PORT = 830;
     private static final int DEFAULT_TIMEOUT = 5000;
 
-    private String hostName;
-    private int port;
-    private int connectionTimeout;
-    private int commandTimeout;
+    private final JSch sshClient;
+    private final String hostName;
+    private final int port;
+    private final int connectionTimeout;
+    private final int commandTimeout;
 
-    private String userName;
-    private String password;
+    private final String userName;
+    private final String password;
 
-    private boolean keyBasedAuthentication;
-    private String pemKeyFile;
+    private final boolean keyBasedAuthentication;
+    private final String pemKeyFile;
 
-    private boolean strictHostKeyChecking;
-    private String hostKeysFileName;
+    private final boolean strictHostKeyChecking;
+    private final String hostKeysFileName;
 
-    private JSch sshClient;
+    private final DocumentBuilder builder;
+    private final List<String> netconfCapabilities;
+    private final String helloRpc;
+
     private ChannelSubsystem sshChannel;
     private Session sshSession;
-
-    private DocumentBuilder builder;
     private NetconfSession netconfSession;
 
-    private List<String> netconfCapabilities;
-    private String helloRpc;
-
     @Builder
-    public Device(
-            @NonNull String hostName,
-            Integer port,
-            Integer timeout,
-            Integer connectionTimeout,
-            Integer commandTimeout,
-            @NonNull String userName,
-            String password,
-            Boolean keyBasedAuthentication,
-            String pemKeyFile,
-            Boolean strictHostKeyChecking,
-            String hostKeysFileName,
-            List<String> netconfCapabilities
+    public Device(JSch sshClient,
+                  @NonNull String hostName,
+                  Integer port,
+                  Integer timeout,
+                  Integer connectionTimeout,
+                  Integer commandTimeout,
+                  @NonNull String userName,
+                  String password,
+                  Boolean keyBasedAuthentication,
+                  String pemKeyFile,
+                  Boolean strictHostKeyChecking,
+                  String hostKeysFileName,
+                  List<String> netconfCapabilities
     ) throws NetconfException {
         this.hostName = hostName;
         this.port = (port != null) ? port : DEFAULT_NETCONF_PORT;
-        Integer commonTimeout =   (timeout != null) ? timeout : DEFAULT_TIMEOUT;
+        Integer commonTimeout = (timeout != null) ? timeout : DEFAULT_TIMEOUT;
         this.connectionTimeout = (connectionTimeout != null) ? connectionTimeout : commonTimeout;
         this.commandTimeout = (commandTimeout != null) ? commandTimeout : commonTimeout;
 
@@ -135,9 +133,9 @@ public class Device implements AutoCloseable {
         }
 
         this.netconfCapabilities = (netconfCapabilities != null) ? netconfCapabilities : getDefaultClientCapabilities();
-        this.helloRpc = createHelloRPC(this.netconfCapabilities);
+        helloRpc = createHelloRPC(this.netconfCapabilities);
 
-        this.sshClient = new JSch();
+        this.sshClient = (sshClient != null) ? sshClient : new JSch();
     }
 
     /**
@@ -189,8 +187,6 @@ public class Device implements AutoCloseable {
      */
     private NetconfSession createNetconfSession() throws NetconfException {
         if (!isConnected()) {
-            sshClient = new JSch();
-
             try {
                 if (strictHostKeyChecking) {
                     if (hostKeysFileName == null) {
@@ -318,11 +314,12 @@ public class Device implements AutoCloseable {
      */
     @Override
     public void close() {
-        if (!isConnected()) {
-            return;
+        if (isChannelConnected()) {
+            sshChannel.disconnect();
         }
-        sshChannel.disconnect();
-        sshSession.disconnect();
+        if (isSessionConnected()) {
+            sshSession.disconnect();
+        }
     }
 
     /**
@@ -411,7 +408,7 @@ public class Device implements AutoCloseable {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
                     "establish a connection first.");
         }
-        return this.netconfSession.executeRPC(rpcContent);
+        return netconfSession.executeRPC(rpcContent);
     }
 
     /**
@@ -969,7 +966,7 @@ public class Device implements AutoCloseable {
      * the "xmlns" attribute will override the default namespace attribute, otherwise the value in
      * NetconfConstants.URN_XML_NS_NETCONF_BASE_1_0 will be used as the default namespace.
      *
-     * @param name The name of the new RPC attribute.
+     * @param name  The name of the new RPC attribute.
      * @param value The value of the new RPC attribute.
      * @throws NullPointerException If the device connection has not been made yet.
      */
@@ -992,8 +989,8 @@ public class Device implements AutoCloseable {
      * value NetconfConstants.URN_XML_NS_NETCONF_BASE_1_0 will still be present in the xml envelope.
      */
     public void clearRPCAttributes() {
-        if(this.netconfSession != null)
-            this.netconfSession.removeAllRPCAttributes();
+        if (netconfSession != null)
+            netconfSession.removeAllRPCAttributes();
     }
 
 }
