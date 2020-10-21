@@ -1,5 +1,10 @@
 package net.juniper.netconf;
 
+import com.jcraft.jsch.ChannelSubsystem;
+import com.jcraft.jsch.HostKeyRepository;
+import com.jcraft.jsch.JSch;
+import com.jcraft.jsch.JSchException;
+import com.jcraft.jsch.Session;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 
@@ -7,6 +12,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
+import static org.mockito.Matchers.any;
+import static org.mockito.Matchers.anyString;
+import static org.mockito.Matchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
+import static org.mockito.Mockito.when;
 
 
 @Category(Test.class)
@@ -17,6 +31,7 @@ public class DeviceTest {
     private static final String TEST_PASSWORD = "password";
     private static final int DEFAULT_NETCONF_PORT = 830;
     private static final int DEFAULT_TIMEOUT = 5000;
+    public static final String SUBSYSTEM = "subsystem";
 
     private Device createTestDevice() throws NetconfException {
         return Device.builder()
@@ -39,6 +54,54 @@ public class DeviceTest {
         assertFalse(device.isKeyBasedAuthentication());
         assertNull(device.getPemKeyFile());
         assertNull(device.getHostKeysFileName());
+    }
+
+    @Test
+    public void GIVEN_sshAvailableNetconfNot_THEN_closeDevice() throws Exception {
+        JSch sshClient = mock(JSch.class);
+        Session session = mock(Session.class);
+        ChannelSubsystem channel = mock(ChannelSubsystem.class);
+        when(channel.isConnected()).thenReturn(false);
+
+        when(session.isConnected()).thenReturn(true);
+        when(session.openChannel(eq(SUBSYSTEM))).thenReturn(channel);
+        doThrow(new JSchException("failed to send channel request")).when(channel).connect(eq(DEFAULT_TIMEOUT));
+
+        when(sshClient.getSession(eq(TEST_USERNAME), eq(TEST_HOSTNAME), eq(DEFAULT_NETCONF_PORT))).thenReturn(session);
+
+        try (Device device = Device.builder()
+                .sshClient(sshClient)
+                .hostName(TEST_HOSTNAME)
+                .userName(TEST_USERNAME)
+                .password(TEST_PASSWORD)
+                .strictHostKeyChecking(false)
+                .build()) {
+            device.connect();
+        } catch (NetconfException e) {
+        }
+
+        verify(channel).connect(eq(DEFAULT_TIMEOUT));
+        verify(channel).setSubsystem(anyString());
+        verify(channel).getInputStream();
+        verify(channel).getOutputStream();
+        verify(channel).isConnected();
+
+        verify(session).disconnect();
+        verify(session).openChannel(eq(SUBSYSTEM));
+        verify(session, times(2)).isConnected();
+        verify(session).getTimeout();
+        verify(session).connect(eq(DEFAULT_TIMEOUT));
+        verify(session).setTimeout(eq(DEFAULT_TIMEOUT));
+        verify(session, times(2)).setConfig(anyString(), anyString());
+        verify(session).setPassword(anyString());
+
+        verify(sshClient).getSession(eq(TEST_USERNAME), eq(TEST_HOSTNAME), eq(DEFAULT_NETCONF_PORT));
+        verify(sshClient).getHostKeyRepository();
+        verify(sshClient).setHostKeyRepository(any(HostKeyRepository.class));
+
+        verifyNoMoreInteractions(channel);
+        verifyNoMoreInteractions(session);
+        verifyNoMoreInteractions(sshClient);
     }
 
     @Test
