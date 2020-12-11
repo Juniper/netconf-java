@@ -15,6 +15,7 @@ import com.jcraft.jsch.Session;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NonNull;
+import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 import org.w3c.dom.Document;
 import org.xml.sax.SAXException;
@@ -55,6 +56,7 @@ import java.util.List;
  */
 @Slf4j
 @Getter
+@ToString
 public class Device implements AutoCloseable {
 
     private static final int DEFAULT_NETCONF_PORT = 830;
