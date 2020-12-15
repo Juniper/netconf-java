@@ -286,9 +286,7 @@ public class NetconfSession {
                 "<source>" +
                 "<" + target + "/>" +
                 "</source>" +
-                "<filter type=\"subtree\">" +
-                configTree +
-                "</filter>" +
+                (configTree == null ? "" : "<filter type=\"subtree\">" + configTree + "</filter>") +
                 "</get-config>" +
                 "</rpc>" +
                 NetconfConstants.DEVICE_PROMPT;
