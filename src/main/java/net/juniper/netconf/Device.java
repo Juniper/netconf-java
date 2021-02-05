@@ -202,8 +202,8 @@ public class Device implements AutoCloseable {
             sshClient.setHostKeyRepository(sshClient.getHostKeyRepository());
             log.info("Connecting to host {} on port {}.", hostName, port);
             if (keyBasedAuthentication) {
-                sshSession = loginWithPrivateKey(connectionTimeout);
                 loadPrivateKey();
+                sshSession = loginWithPrivateKey(connectionTimeout);
             } else {
                 sshSession = loginWithUserPass(connectionTimeout);
             }
@@ -224,7 +224,7 @@ public class Device implements AutoCloseable {
             return new NetconfSession(sshChannel, connectionTimeout, commandTimeout, helloRpc, builder);
         } catch (JSchException | IOException e) {
             throw new NetconfException("Failed to create Netconf session:" +
-                    e.getMessage());
+                    e.getMessage(), e);
         }
     }
 
@@ -232,7 +232,7 @@ public class Device implements AutoCloseable {
         try {
             Session session = sshClient.getSession(userName, hostName, port);
             session.setConfig("userauth", "password");
-            session.setConfig("StrictHostKeyChecking", "no");
+            session.setConfig("StrictHostKeyChecking", isStrictHostKeyChecking() ? "yes" : "no");
             session.setPassword(password);
             session.connect(timeoutMilliSeconds);
             return session;
@@ -246,12 +246,12 @@ public class Device implements AutoCloseable {
         try {
             Session session = sshClient.getSession(userName, hostName, port);
             session.setConfig("userauth", "publickey");
-            session.setConfig("StrictHostKeyChecking", "no");
+            session.setConfig("StrictHostKeyChecking", isStrictHostKeyChecking() ? "yes" : "no");
             session.connect(timeoutMilliSeconds);
             return session;
         } catch (JSchException e) {
             throw new NetconfException(String.format("Error using key pair file: %s to connect to host: %s - Error: %s",
-                    pemKeyFile, hostName, e.getMessage()));
+                    pemKeyFile, hostName, e.getMessage()), e);
         }
     }
 
@@ -843,6 +843,14 @@ public class Device implements AutoCloseable {
                     "establish a connection first.");
         }
         return this.netconfSession.getRunningConfig(configTree);
+    }
+
+    public XML getRunningConfigAndState(String filter) throws IOException, SAXException {
+        if (netconfSession == null) {
+            throw new IllegalStateException("Cannot execute RPC, you need to " +
+                    "establish a connection first.");
+        }
+        return this.netconfSession.getRunningConfigAndState(filter);
     }
 
     /**

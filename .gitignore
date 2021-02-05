@@ -20,6 +20,7 @@ gradlew
 gradlew.bat
 
 logs/
+log-test/
 
 .DS_Store
 .factorypath

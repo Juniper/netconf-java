@@ -278,6 +278,17 @@ public class NetconfSession {
         return lastRpcReply;
     }
 
+    public XML getRunningConfigAndState(String filter) throws IOException, SAXException {
+        String rpc = "<rpc>" +
+                "<get>" +
+                (filter == null ? "" : filter) +
+                "</get>" +
+                "</rpc>" +
+                NetconfConstants.DEVICE_PROMPT;
+        lastRpcReply = getRpcReply(rpc);
+        return convertToXML(lastRpcReply);
+    }
+
     private String getConfig(String target, String configTree)
             throws IOException {
 
