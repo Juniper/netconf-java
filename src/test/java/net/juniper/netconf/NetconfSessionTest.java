@@ -1,5 +1,6 @@
 package net.juniper.netconf;
 
+import com.google.common.base.Charsets;
 import com.jcraft.jsch.Channel;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.Before;
@@ -33,10 +34,6 @@ public class NetconfSessionTest {
     public static final int COMMAND_TIMEOUT = 5000;
 
     private static final String FAKE_HELLO = "fake hello";
-    private static final String MERGE_LOAD_TYPE = "merge";
-    private static final String REPLACE_LOAD_TYPE = "replace";
-    private static final String BAD_LOAD_TYPE = "other";
-    private static final String FAKE_TEXT_FILE_PATH = "fakepath";
 
     private static final String DEVICE_PROMPT = "]]>]]>";
     private static final byte[] DEVICE_PROMPT_BYTE = DEVICE_PROMPT.getBytes();
@@ -88,7 +85,7 @@ public class NetconfSessionTest {
     }
 
     @Test
-    public void GIVEN_createSession_WHEN_timeoutExceeded_THEN_throwSocketTimeoutException() throws Exception {
+    public void GIVEN_createSession_WHEN_timeoutExceeded_THEN_throwSocketTimeoutException() {
         Thread thread = new Thread(() -> {
             try {
                 outPipe.write(FAKE_RPC_REPLY.getBytes());
@@ -111,7 +108,7 @@ public class NetconfSessionTest {
     }
 
     @Test
-    public void GIVEN_createSession_WHEN_connectionClose_THEN_throwSocketTimeoutException() throws Exception {
+    public void GIVEN_createSession_WHEN_connectionClose_THEN_throwSocketTimeoutException() {
         Thread thread = new Thread(() -> {
             try {
                 outPipe.write(FAKE_RPC_REPLY.getBytes());
@@ -155,6 +152,8 @@ public class NetconfSessionTest {
     @Test
     public void GIVEN_executeRPC_WHEN_lldpRequest_THEN_correctResponse() throws Exception {
         byte[] lldpResponse = Files.readAllBytes(TestHelper.getSampleFile("responses/lldpResponse.xml").toPath());
+        String expectedResponse = new String(lldpResponse, Charsets.UTF_8)
+                .replaceAll(NetconfConstants.CR, NetconfConstants.EMPTY_LINE) + NetconfConstants.LF;
 
         Thread thread = new Thread(() -> {
             try {
@@ -179,7 +178,7 @@ public class NetconfSessionTest {
         Thread.sleep(200);
         String deviceResponse = netconfSession.executeRPC(TestConstants.LLDP_REQUEST).toString();
 
-        assertEquals(new String(lldpResponse) + NetconfConstants.LF, deviceResponse);
+        assertEquals(expectedResponse, deviceResponse);
     }
 
     @Test
@@ -187,7 +186,7 @@ public class NetconfSessionTest {
         when(mockNetconfSession.executeRPC(eq(TestConstants.LLDP_REQUEST))).thenCallRealMethod();
         when(mockNetconfSession.getRpcReply(anyString())).thenReturn(NETCONF_SYNTAX_ERROR_MSG_FROM_DEVICE);
 
-        assertThatThrownBy(() -> mockNetconfSession.executeRPC(TestConstants.LLDP_REQUEST).toString())
+        assertThatThrownBy(() -> mockNetconfSession.executeRPC(TestConstants.LLDP_REQUEST))
                 .isInstanceOf(NetconfException.class)
                 .hasMessage("Netconf server detected an error: netconf error: syntax error");
     }

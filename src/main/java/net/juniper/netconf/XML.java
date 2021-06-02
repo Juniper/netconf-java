@@ -391,7 +391,7 @@ public class XML {
                     return null;
                 }
             }        }
-        if (nextElement == null) {
+        if (nextElement == null || nextElement.getFirstChild() == null || nextElement.getFirstChild().getNodeValue()== null) {
             return null;
         }
         String value = nextElement.getFirstChild().getNodeValue();
