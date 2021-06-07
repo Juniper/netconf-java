@@ -33,5 +33,6 @@ public class NetconfConstants {
 
     public static final String EMPTY_LINE = "";
     public static final String LF = "\n";
+    public static final String CR = "\r";
 
 }
