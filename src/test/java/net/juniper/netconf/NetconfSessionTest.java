@@ -13,10 +13,12 @@ import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
 import java.io.BufferedOutputStream;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.net.SocketTimeoutException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -226,5 +228,34 @@ public class NetconfSessionTest {
         }
 
         return new NetconfSession(mockChannel, CONNECTION_TIMEOUT, commandTimeout, FAKE_HELLO, builder);
+    }
+
+    @Test
+    public void WHEN_instantiated_THEN_fetchHelloFromServer() throws Exception {
+
+        final String hello = ""
+            + "<hello xmlns=\"urn:ietf:params:xml:ns:netconf:base:1.0\">\n"
+            + "  <capabilities>\n"
+            + "    <capability>urn:ietf:params:netconf:base:1.0</capability>\n"
+            + "    <capability>urn:ietf:params:netconf:base:1.0#candidate</capability>\n"
+            + "    <capability>urn:ietf:params:netconf:base:1.0#confirmed-commit</capability>\n"
+            + "    <capability>urn:ietf:params:netconf:base:1.0#validate</capability>\n"
+            + "    <capability>urn:ietf:params:netconf:base:1.0#url?protocol=http,ftp,file</capability>\n"
+            + "  </capabilities>\n"
+            + "  <session-id>27700</session-id>\n"
+            + "</hello>";
+
+        final ByteArrayInputStream is = new ByteArrayInputStream(
+            (hello + NetconfConstants.DEVICE_PROMPT)
+                .getBytes(StandardCharsets.UTF_8));
+        when(mockChannel.getInputStream())
+            .thenReturn(is);
+
+        final NetconfSession netconfSession = createNetconfSession(100);
+        assertThat(netconfSession.getSessionId())
+            .isEqualTo("27700");
+        assertThat(netconfSession.getServerHello().hasCapability(NetconfConstants.URN_IETF_PARAMS_NETCONF_BASE_1_0))
+            .isTrue();
+
     }
 }
