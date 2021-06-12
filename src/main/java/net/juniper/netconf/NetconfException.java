@@ -17,4 +17,8 @@ public class NetconfException extends IOException {
     public NetconfException(String msg) {
         super(msg);
     }
+
+    public NetconfException(String msg, Throwable t) {
+        super(msg, t);
+    }
 }
