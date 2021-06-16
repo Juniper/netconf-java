@@ -3,6 +3,8 @@ package net.juniper.netconf;
 import com.google.common.base.Charsets;
 import com.jcraft.jsch.Channel;
 import lombok.extern.slf4j.Slf4j;
+import net.juniper.netconf.element.RpcError;
+import net.juniper.netconf.element.RpcReply;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
@@ -15,6 +17,7 @@ import javax.xml.parsers.ParserConfigurationException;
 import java.io.BufferedOutputStream;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.net.SocketTimeoutException;
@@ -24,8 +27,15 @@ import java.nio.file.Files;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.anyString;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @Slf4j
@@ -73,7 +83,7 @@ public class NetconfSessionTest {
 
         assertThatThrownBy(mockNetconfSession::getCandidateConfig)
                 .isInstanceOf(NetconfException.class)
-                .hasMessage("Netconf server detected an error: netconf error: syntax error");
+                .hasMessage("Invalid <rpc-reply> message from server: netconf error: syntax error");
     }
 
     @Test
@@ -83,7 +93,7 @@ public class NetconfSessionTest {
 
         assertThatThrownBy(mockNetconfSession::getRunningConfig)
                 .isInstanceOf(NetconfException.class)
-                .hasMessage("Netconf server detected an error: netconf error: syntax error");
+                .hasMessage("Invalid <rpc-reply> message from server: netconf error: syntax error");
     }
 
     @Test
@@ -190,7 +200,7 @@ public class NetconfSessionTest {
 
         assertThatThrownBy(() -> mockNetconfSession.executeRPC(TestConstants.LLDP_REQUEST))
                 .isInstanceOf(NetconfException.class)
-                .hasMessage("Netconf server detected an error: netconf error: syntax error");
+                .hasMessage("Invalid <rpc-reply> message from server: netconf error: syntax error");
     }
 
     @Test
@@ -258,4 +268,141 @@ public class NetconfSessionTest {
             .isTrue();
 
     }
+
+    private static void mockResponse(final InputStream is, final String message) throws IOException {
+        final String messageWithTerminator = message + NetconfConstants.DEVICE_PROMPT;
+        doAnswer(invocationOnMock -> {
+            final byte[] buffer = (byte[])invocationOnMock.getArguments()[0];
+            final int offset = (int)invocationOnMock.getArguments()[1];
+            final int bufferLength = (int)invocationOnMock.getArguments()[2];
+            final byte[] messageBytes = messageWithTerminator.getBytes(StandardCharsets.UTF_8);
+            if(messageBytes.length > bufferLength ) {
+                throw new IllegalArgumentException("Requires more work for long messages");
+            }
+            System.arraycopy(messageBytes, 0, buffer, offset, messageBytes.length);
+            return messageBytes.length;
+        }).when(is).read(any(), anyInt(), anyInt());
+    }
+
+    @Test
+    public void loadTextConfigurationWillSucceedIfResponseIsOk() throws Exception {
+
+        final InputStream is = mock(InputStream.class);
+        when(mockChannel.getInputStream())
+            .thenReturn(is);
+        mockResponse(is, "<hello/>");
+        final NetconfSession netconfSession = createNetconfSession(100);
+
+        final RpcReply rpcReply = RpcReply.builder()
+            .ok(true)
+            .build();
+        mockResponse(is, rpcReply.getXml());
+
+        netconfSession.loadTextConfiguration("some config", "some type");
+
+        verify(is, times(2)).read(any(), anyInt(), anyInt());
+    }
+
+    @Test
+    public void loadTextConfigurationWillFailIfResponseIsNotOk() throws Exception {
+
+        final InputStream is = mock(InputStream.class);
+        when(mockChannel.getInputStream())
+            .thenReturn(is);
+        mockResponse(is, "<hello/>");
+        final NetconfSession netconfSession = createNetconfSession(100);
+
+        final RpcReply rpcReply = RpcReply.builder()
+            .ok(false)
+            .build();
+        mockResponse(is, rpcReply.getXml());
+
+        assertThrows(LoadException.class,
+            () -> netconfSession.loadTextConfiguration("some config", "some type"));
+
+        verify(is, times(2)).read(any(), anyInt(), anyInt());
+    }
+
+    @Test
+    public void loadTextConfigurationWillFailIfResponseIsOkWithErrors() throws Exception {
+
+        final InputStream is = mock(InputStream.class);
+        when(mockChannel.getInputStream())
+            .thenReturn(is);
+        mockResponse(is, "<hello/>");
+        final NetconfSession netconfSession = createNetconfSession(100);
+
+        final RpcReply rpcReply = RpcReply.builder()
+            .ok(true)
+            .error(RpcError.builder().errorSeverity(RpcError.ErrorSeverity.ERROR).build())
+            .build();
+        mockResponse(is, rpcReply.getXml());
+
+        assertThrows(LoadException.class,
+            () -> netconfSession.loadTextConfiguration("some config", "some type"));
+
+        verify(is, times(2)).read(any(), anyInt(), anyInt());
+    }
+
+    @Test
+    public void loadXmlConfigurationWillSucceedIfResponseIsOk() throws Exception {
+
+        final InputStream is = mock(InputStream.class);
+        when(mockChannel.getInputStream())
+            .thenReturn(is);
+        mockResponse(is, "<hello/>");
+        final NetconfSession netconfSession = createNetconfSession(100);
+
+        final RpcReply rpcReply = RpcReply.builder()
+            .ok(true)
+            .build();
+        mockResponse(is, rpcReply.getXml());
+
+        netconfSession.loadXMLConfiguration("some config", "merge");
+
+        verify(is, times(2)).read(any(), anyInt(), anyInt());
+    }
+
+    @Test
+    public void loadXmlConfigurationWillFailIfResponseIsNotOk() throws Exception {
+
+        final InputStream is = mock(InputStream.class);
+        when(mockChannel.getInputStream())
+            .thenReturn(is);
+        mockResponse(is, "<hello/>");
+        final NetconfSession netconfSession = createNetconfSession(100);
+
+        final RpcReply rpcReply = RpcReply.builder()
+            .ok(false)
+            .build();
+
+        mockResponse(is, rpcReply.getXml());
+
+        assertThrows(LoadException.class,
+            () -> netconfSession.loadXMLConfiguration("some config", "merge"));
+
+        verify(is, times(2)).read(any(), anyInt(), anyInt());
+    }
+
+    @Test
+    public void loadXmlConfigurationWillFailIfResponseIsOkWithErrors() throws Exception {
+
+        final InputStream is = mock(InputStream.class);
+        when(mockChannel.getInputStream())
+            .thenReturn(is);
+        mockResponse(is, "<hello/>");
+        final NetconfSession netconfSession = createNetconfSession(100);
+
+        final RpcReply rpcReply = RpcReply.builder()
+            .ok(true)
+            .error(RpcError.builder().errorSeverity(RpcError.ErrorSeverity.ERROR).build())
+            .build();
+        mockResponse(is, rpcReply.getXml());
+
+        assertThrows(LoadException.class,
+            () -> netconfSession.loadXMLConfiguration("some config", "merge"));
+
+        verify(is, times(2)).read(any(), anyInt(), anyInt());
+    }
+
 }

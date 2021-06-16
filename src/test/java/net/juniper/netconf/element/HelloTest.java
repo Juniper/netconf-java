@@ -1,9 +1,9 @@
 package net.juniper.netconf.element;
 
-import static org.assertj.core.api.Assertions.assertThat;
-
 import org.junit.Test;
 import org.xmlunit.assertj.XmlAssert;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 public class HelloTest {
 
@@ -80,7 +80,7 @@ public class HelloTest {
                 .sessionId("27700")
                 .build();
 
-        XmlAssert.assertThat(hello.toXML())
+        XmlAssert.assertThat(hello.getXml())
                 .and(HELLO_WITHOUT_NAMESPACE)
                 .ignoreWhitespace()
                 .areIdentical();
@@ -99,7 +99,7 @@ public class HelloTest {
                 .sessionId("27703")
                 .build();
 
-        XmlAssert.assertThat(hello.toXML())
+        XmlAssert.assertThat(hello.getXml())
                 .and(HELLO_WITH_NAMESPACE)
                 .ignoreWhitespace()
                 .areIdentical();

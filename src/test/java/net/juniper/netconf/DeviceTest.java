@@ -20,7 +20,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
-import static org.mockito.Matchers.any;
 import static org.mockito.Matchers.anyString;
 import static org.mockito.Matchers.eq;
 import static org.mockito.Mockito.doThrow;
@@ -90,6 +89,7 @@ public class DeviceTest {
     public void GIVEN_sshAvailableNetconfNot_THEN_closeDevice() throws Exception {
         JSch sshClient = mock(JSch.class);
         Session session = mock(Session.class);
+        HostKeyRepository hostKeyRepository = mock(HostKeyRepository.class);
         ChannelSubsystem channel = mock(ChannelSubsystem.class);
         when(channel.isConnected()).thenReturn(false);
 
@@ -98,6 +98,7 @@ public class DeviceTest {
         doThrow(new JSchException("failed to send channel request")).when(channel).connect(eq(DEFAULT_TIMEOUT));
 
         when(sshClient.getSession(eq(TEST_USERNAME), eq(TEST_HOSTNAME), eq(DEFAULT_NETCONF_PORT))).thenReturn(session);
+        when(sshClient.getHostKeyRepository()).thenReturn(hostKeyRepository);
 
         try (Device device = Device.builder()
                 .sshClient(sshClient)
@@ -128,7 +129,7 @@ public class DeviceTest {
 
         verify(sshClient).getSession(eq(TEST_USERNAME), eq(TEST_HOSTNAME), eq(DEFAULT_NETCONF_PORT));
         verify(sshClient).getHostKeyRepository();
-        verify(sshClient).setHostKeyRepository(any(HostKeyRepository.class));
+        verify(sshClient).setHostKeyRepository(hostKeyRepository);
 
         verifyNoMoreInteractions(channel);
         verifyNoMoreInteractions(session);
