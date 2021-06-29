@@ -14,12 +14,15 @@ import com.jcraft.jsch.Channel;
 import com.jcraft.jsch.JSchException;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
+import net.juniper.netconf.element.Hello;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.xml.sax.InputSource;
 import org.xml.sax.SAXException;
 
 import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.ParserConfigurationException;
+import javax.xml.xpath.XPathExpressionException;
 import java.io.BufferedReader;
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -59,9 +62,10 @@ public class NetconfSession {
 
     private final Channel netconfChannel;
     private String serverCapability;
+    private Hello serverHello;
 
-    private InputStream stdInStreamFromDevice;
-    private OutputStream stdOutStreamToDevice;
+    private final InputStream stdInStreamFromDevice;
+    private final OutputStream stdOutStreamToDevice;
 
     private String lastRpcReply;
     private final DocumentBuilder builder;
@@ -116,6 +120,11 @@ public class NetconfSession {
         String reply = getRpcReply(hello);
         serverCapability = reply;
         lastRpcReply = reply;
+        try {
+            serverHello = Hello.from(reply);
+        } catch (final ParserConfigurationException | SAXException | XPathExpressionException e) {
+            throw new NetconfException("Invalid <hello> message from server: " + reply, e);
+        }
     }
 
     @VisibleForTesting
@@ -128,7 +137,7 @@ public class NetconfSession {
         final long startTime = System.nanoTime();
         final Reader in = new InputStreamReader(stdInStreamFromDevice, Charsets.UTF_8);
         boolean timeoutNotExceeded = true;
-        int promptPosition = -1;
+        int promptPosition;
         while ((promptPosition = rpcReply.indexOf(NetconfConstants.DEVICE_PROMPT)) < 0 &&
                 (timeoutNotExceeded = (TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startTime) < commandTimeout))) {
             int charsRead = in.read(buffer, 0, buffer.length);
@@ -315,6 +324,14 @@ public class NetconfSession {
     }
 
     /**
+     * Returns the &lt;hello&gt; message received from the server. See https://datatracker.ietf.org/doc/html/rfc6241#section-8.1
+     * @return the &lt;hello&gt; message received from the server.
+     */
+    public Hello getServerHello() {
+        return serverHello;
+    }
+
+    /**
      * Send an RPC(as String object) over the default Netconf session and get
      * the response as an XML object.
      * <p>
@@ -450,13 +467,7 @@ public class NetconfSession {
      * @return Session ID as a string.
      */
     public String getSessionId() {
-        String[] split = serverCapability.split("<session-id>");
-        if (split.length != 2)
-            return null;
-        String[] idSplit = split[1].split("</session-id>");
-        if (idSplit.length != 2)
-            return null;
-        return idSplit[0];
+        return serverHello.getSessionId();
     }
 
     /**

@@ -17,6 +17,7 @@ import lombok.Getter;
 import lombok.NonNull;
 import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
+import net.juniper.netconf.element.Hello;
 import org.w3c.dom.Document;
 import org.xml.sax.SAXException;
 
@@ -28,7 +29,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.Charset;
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -61,6 +62,13 @@ public class Device implements AutoCloseable {
 
     private static final int DEFAULT_NETCONF_PORT = 830;
     private static final int DEFAULT_TIMEOUT = 5000;
+    private static final List<String> DEFAULT_CLIENT_CAPABILITIES = Arrays.asList(
+        NetconfConstants.URN_IETF_PARAMS_NETCONF_BASE_1_0,
+        NetconfConstants.URN_IETF_PARAMS_NETCONF_BASE_1_0 + "#candidate",
+        NetconfConstants.URN_IETF_PARAMS_NETCONF_BASE_1_0 + "#confirmed-commit",
+        NetconfConstants.URN_IETF_PARAMS_NETCONF_BASE_1_0 + "#validate",
+        NetconfConstants.URN_IETF_PARAMS_NETCONF_BASE_1_0 + "#url?protocol=http,ftp,file"
+    );
 
     private final JSch sshClient;
     private final String hostName;
@@ -148,13 +156,7 @@ public class Device implements AutoCloseable {
      * @return List of default client capabilities.
      */
     private List<String> getDefaultClientCapabilities() {
-        List<String> defaultCap = new ArrayList<>();
-        defaultCap.add(NetconfConstants.URN_IETF_PARAMS_NETCONF_BASE_1_0);
-        defaultCap.add(NetconfConstants.URN_IETF_PARAMS_NETCONF_BASE_1_0 + "#candidate");
-        defaultCap.add(NetconfConstants.URN_IETF_PARAMS_NETCONF_BASE_1_0 + "#confirmed-commit");
-        defaultCap.add(NetconfConstants.URN_IETF_PARAMS_NETCONF_BASE_1_0 + "#validate");
-        defaultCap.add(NetconfConstants.URN_IETF_PARAMS_NETCONF_BASE_1_0 + "#url?protocol=http,ftp,file");
-        return defaultCap;
+        return DEFAULT_CLIENT_CAPABILITIES;
     }
 
     /**
@@ -165,20 +167,11 @@ public class Device implements AutoCloseable {
      * @return the hello RPC that represents those capabilities.
      */
     private String createHelloRPC(List<String> capabilities) {
-        StringBuilder helloRPC = new StringBuilder();
-        helloRPC.append("<hello xmlns=\"" + NetconfConstants.URN_XML_NS_NETCONF_BASE_1_0 + "\">\n");
-        helloRPC.append("<capabilities>\n");
-        for (Object o : capabilities) {
-            String capability = (String) o;
-            helloRPC
-                    .append("<capability>")
-                    .append(capability)
-                    .append("</capability>\n");
-        }
-        helloRPC.append("</capabilities>\n");
-        helloRPC.append("</hello>\n");
-        helloRPC.append(NetconfConstants.DEVICE_PROMPT);
-        return helloRPC.toString();
+        return Hello.builder()
+            .capabilities(capabilities)
+            .build()
+            .toXML()
+            + NetconfConstants.DEVICE_PROMPT;
     }
 
     /**
