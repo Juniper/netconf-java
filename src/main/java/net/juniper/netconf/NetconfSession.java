@@ -15,6 +15,7 @@ import com.jcraft.jsch.JSchException;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import net.juniper.netconf.element.Hello;
+import net.juniper.netconf.element.RpcReply;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.xml.sax.InputSource;
@@ -68,6 +69,7 @@ public class NetconfSession {
     private final OutputStream stdOutStreamToDevice;
 
     private String lastRpcReply;
+    private RpcReply lastRpcReplyObject;
     private final DocumentBuilder builder;
     private final int commandTimeout;
 
@@ -117,14 +119,7 @@ public class NetconfSession {
     }
 
     private void sendHello(String hello) throws IOException {
-        String reply = getRpcReply(hello);
-        serverCapability = reply;
-        lastRpcReply = reply;
-        try {
-            serverHello = Hello.from(reply);
-        } catch (final ParserConfigurationException | SAXException | XPathExpressionException e) {
-            throw new NetconfException("Invalid <hello> message from server: " + reply, e);
-        }
+        setHelloReply(getRpcReply(hello));
     }
 
     @VisibleForTesting
@@ -228,9 +223,28 @@ public class NetconfSession {
                 "</edit-config>" +
                 "</rpc>" +
                 NetconfConstants.DEVICE_PROMPT;
-        lastRpcReply = getRpcReply(rpc);
+        setLastRpcReply(getRpcReply(rpc));
         if (hasError() || !isOK())
             throw new LoadException("Load operation returned error.");
+    }
+
+    private void setHelloReply(final String reply) throws IOException {
+        this.serverCapability = reply;
+        this.lastRpcReply = reply;
+        try {
+            this.serverHello = Hello.from(reply);
+        } catch (final ParserConfigurationException | SAXException | XPathExpressionException e) {
+            throw new NetconfException("Invalid <hello> message from server: " + reply, e);
+        }
+    }
+
+    private void setLastRpcReply(final String reply) throws IOException {
+        this.lastRpcReply = reply;
+        try {
+            this.lastRpcReplyObject = RpcReply.from(reply);
+        } catch (final ParserConfigurationException | SAXException | XPathExpressionException e) {
+            throw new NetconfException("Invalid <rpc-reply> message from server: " + lastRpcReply, e);
+        }
     }
 
     /**
@@ -265,7 +279,7 @@ public class NetconfSession {
                 "</edit-config>" +
                 "</rpc>" +
                 NetconfConstants.DEVICE_PROMPT;
-        lastRpcReply = getRpcReply(rpc);
+        setLastRpcReply(getRpcReply(rpc));
         if (hasError() || !isOK())
             throw new LoadException("Load operation returned error");
     }
@@ -283,7 +297,7 @@ public class NetconfSession {
                 "</get-config>" +
                 "</rpc>" +
                 NetconfConstants.DEVICE_PROMPT;
-        lastRpcReply = getRpcReply(rpc);
+        setLastRpcReply(getRpcReply(rpc));
         return lastRpcReply;
     }
 
@@ -294,7 +308,7 @@ public class NetconfSession {
                 "</get>" +
                 "</rpc>" +
                 NetconfConstants.DEVICE_PROMPT;
-        lastRpcReply = getRpcReply(rpc);
+        setLastRpcReply(getRpcReply(rpc));
         return convertToXML(lastRpcReply);
     }
 
@@ -310,7 +324,7 @@ public class NetconfSession {
                 "</get-config>" +
                 "</rpc>" +
                 NetconfConstants.DEVICE_PROMPT;
-        lastRpcReply = getRpcReply(rpc);
+        setLastRpcReply(getRpcReply(rpc));
         return lastRpcReply;
     }
 
@@ -348,7 +362,7 @@ public class NetconfSession {
      */
     public XML executeRPC(String rpcContent) throws SAXException, IOException {
         String rpcReply = getRpcReply(fixupRpc(rpcContent));
-        lastRpcReply = rpcReply;
+        setLastRpcReply(rpcReply);
         return convertToXML(rpcReply);
     }
 
@@ -481,7 +495,7 @@ public class NetconfSession {
                 "<close-session/>" +
                 "</rpc>" +
                 NetconfConstants.DEVICE_PROMPT;
-        lastRpcReply = getRpcReply(rpc);
+        setLastRpcReply(getRpcReply(rpc));
         netconfChannel.disconnect();
     }
 
@@ -493,18 +507,7 @@ public class NetconfSession {
      * @throws java.io.IOException      If there are issues communicating with the netconf server.
      */
     public boolean hasError() throws SAXException, IOException {
-        if (lastRpcReply == null || !(lastRpcReply.contains("<rpc-error>")))
-            return false;
-        String errorSeverity = parseForErrors(lastRpcReply);
-        return errorSeverity != null && errorSeverity.equals("error");
-    }
-
-    private String parseForErrors(String inputXmlReply) throws IOException, SAXException {
-        XML xmlReply = convertToXML(lastRpcReply);
-        List<String> tagList = new ArrayList<>();
-        tagList.add("rpc-error");
-        tagList.add("error-severity");
-        return xmlReply.findValue(tagList);
+        return lastRpcReplyObject.hasErrors();
     }
 
     /**
@@ -515,10 +518,7 @@ public class NetconfSession {
      * @throws java.io.IOException      If there are issues communicating with the netconf server.
      */
     public boolean hasWarning() throws SAXException, IOException {
-        if (lastRpcReply == null || !(lastRpcReply.contains("<rpc-error>")))
-            return false;
-        String errorSeverity = parseForErrors(lastRpcReply);
-        return errorSeverity != null && errorSeverity.equals("warning");
+        return lastRpcReplyObject.hasWarnings();
     }
 
     /**
@@ -528,7 +528,7 @@ public class NetconfSession {
      * @return true if &lt;ok/&gt; tag is found in last RPC reply.
      */
     public boolean isOK() {
-        return lastRpcReply != null && lastRpcReply.contains("<ok/>");
+        return lastRpcReplyObject.isOk();
     }
 
     /**
@@ -547,7 +547,7 @@ public class NetconfSession {
                 "</lock>" +
                 "</rpc>" +
                 NetconfConstants.DEVICE_PROMPT;
-        lastRpcReply = getRpcReply(rpc);
+        setLastRpcReply(getRpcReply(rpc));
         return !hasError() && isOK();
     }
 
@@ -567,7 +567,7 @@ public class NetconfSession {
                 "</unlock>" +
                 "</rpc>" +
                 NetconfConstants.DEVICE_PROMPT;
-        lastRpcReply = getRpcReply(rpc);
+        setLastRpcReply(getRpcReply(rpc));
         return !hasError() && isOK();
     }
 
@@ -591,7 +591,7 @@ public class NetconfSession {
                 "</configuration-set>" +
                 "</load-configuration>" +
                 "</rpc>";
-        lastRpcReply = getRpcReply(rpc);
+        setLastRpcReply(getRpcReply(rpc));
         if (hasError() || !isOK())
             throw new LoadException("Load operation returned error");
     }
@@ -725,7 +725,7 @@ public class NetconfSession {
                 "<commit/>" +
                 "</rpc>" +
                 NetconfConstants.DEVICE_PROMPT;
-        lastRpcReply = getRpcReply(rpc);
+        setLastRpcReply(getRpcReply(rpc));
         if (hasError() || !isOK())
             throw new CommitException("Commit operation returned error.");
     }
@@ -747,7 +747,7 @@ public class NetconfSession {
                 "</commit>" +
                 "</rpc>" +
                 NetconfConstants.DEVICE_PROMPT;
-        lastRpcReply = getRpcReply(rpc);
+        setLastRpcReply(getRpcReply(rpc));
         if (hasError() || !isOK())
             throw new CommitException("Commit operation returned " +
                     "error.");
@@ -767,7 +767,7 @@ public class NetconfSession {
                 "</commit-configuration>" +
                 "</rpc>" +
                 NetconfConstants.DEVICE_PROMPT;
-        lastRpcReply = getRpcReply(rpc);
+        setLastRpcReply(getRpcReply(rpc));
         if (hasError() || !isOK())
             throw new CommitException("Commit operation returned error.");
     }
@@ -842,7 +842,7 @@ public class NetconfSession {
                 "</validate>" +
                 "</rpc>" +
                 NetconfConstants.DEVICE_PROMPT;
-        lastRpcReply = getRpcReply(rpc);
+        setLastRpcReply(getRpcReply(rpc));
         return !hasError() && isOK();
     }
 
@@ -878,7 +878,7 @@ public class NetconfSession {
                 "</rpc>" +
                 NetconfConstants.DEVICE_PROMPT;
         String rpcReply = getRpcReply(rpc);
-        lastRpcReply = rpcReply;
+        setLastRpcReply(rpcReply);
         XML xmlReply = convertToXML(rpcReply);
         List<String> tags = new ArrayList<>();
         tags.add("output");
@@ -927,7 +927,7 @@ public class NetconfSession {
         rpc.append("</open-configuration>");
         rpc.append("</rpc>");
         rpc.append(NetconfConstants.DEVICE_PROMPT);
-        lastRpcReply = getRpcReply(rpc.toString());
+        setLastRpcReply(getRpcReply(rpc.toString()));
     }
 
     /**
@@ -941,7 +941,7 @@ public class NetconfSession {
                 "<close-configuration/>" +
                 "</rpc>" +
                 NetconfConstants.DEVICE_PROMPT;
-        lastRpcReply = getRpcReply(rpc);
+        setLastRpcReply(getRpcReply(rpc));
     }
 
     /**
@@ -951,6 +951,15 @@ public class NetconfSession {
      */
     public String getLastRPCReply() {
         return this.lastRpcReply;
+    }
+
+    /**
+     * Returns the last RPC reply sent by Netconf server.
+     *
+     * @return Last RPC reply, as a RpcReply object.
+     */
+    public RpcReply getLastRpcReplyObject() {
+        return lastRpcReplyObject;
     }
 
     /**

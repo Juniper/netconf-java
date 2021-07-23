@@ -170,7 +170,7 @@ public class Device implements AutoCloseable {
         return Hello.builder()
             .capabilities(capabilities)
             .build()
-            .toXML()
+            .getXml()
             + NetconfConstants.DEVICE_PROMPT;
     }
 
