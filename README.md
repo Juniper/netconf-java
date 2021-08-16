@@ -14,6 +14,7 @@ REQUIREMENTS
 ============
 
 [OpenJDK 8](http://openjdk.java.net/projects/jdk8/) or Java 8
+[Maven](https://maven.apache.org/download.cgi) if you want to build using `mvn` [Supported from v2.1.1].
 
 [Maven](https://maven.apache.org/download.cgi) if you want to build using `mvn` [Supported from v2.1.1].
 
@@ -35,6 +36,8 @@ User may download the source code and compile it with desired JDK version.
   * Use the jar file from (source to netconf-java)/netconf-java/target
   * Use `mvn versions:display-dependency-updates` to identify possible target versions for dependencies
   
+=======
+
 v2.1.1
 ------
 
