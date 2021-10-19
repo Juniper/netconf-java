@@ -100,7 +100,7 @@ public class NetconfSession {
             netconfChannel.connect(connectionTimeout);
         } catch (JSchException e) {
             throw new NetconfException("Failed to create Netconf session:" +
-                    e.getMessage());
+                    e.getMessage(), e);
         }
         this.netconfChannel = netconfChannel;
         this.commandTimeout = commandTimeout;

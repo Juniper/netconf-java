@@ -139,7 +139,7 @@ public class Device implements AutoCloseable {
         try {
             builder = factory.newDocumentBuilder();
         } catch (ParserConfigurationException e) {
-            throw new NetconfException(String.format("Error creating XML Parser: %s", e.getMessage()));
+            throw new NetconfException(String.format("Error creating XML Parser: %s", e.getMessage()), e);
         }
 
         this.netconfCapabilities = (netconfCapabilities != null) ? netconfCapabilities : getDefaultClientCapabilities();
@@ -190,7 +190,7 @@ public class Device implements AutoCloseable {
                     sshClient.setKnownHosts(hostKeysFileName);
                 }
             } catch (JSchException e) {
-                throw new NetconfException(String.format("Error loading known hosts file: %s", e.getMessage()));
+                throw new NetconfException(String.format("Error loading known hosts file: %s", e.getMessage()), e);
             }
             sshClient.setHostKeyRepository(sshClient.getHostKeyRepository());
             log.info("Connecting to host {} on port {}.", hostName, port);
@@ -203,7 +203,7 @@ public class Device implements AutoCloseable {
             try {
                 sshSession.setTimeout(connectionTimeout);
             } catch (JSchException e) {
-                throw new NetconfException(String.format("Error setting session timeout: %s", e.getMessage()));
+                throw new NetconfException(String.format("Error setting session timeout: %s", e.getMessage()), e);
             }
             if (sshSession.isConnected()) {
                 log.info("Connected to host {} - Timeout set to {} msecs.", hostName, sshSession.getTimeout());
@@ -231,7 +231,7 @@ public class Device implements AutoCloseable {
             return session;
         } catch (JSchException e) {
             throw new NetconfException(String.format("Error connecting to host: %s - Error: %s",
-                    hostName, e.getMessage()));
+                    hostName, e.getMessage()), e);
         }
     }
 
@@ -266,7 +266,7 @@ public class Device implements AutoCloseable {
         try {
             sshClient.addIdentity(pemKeyFile);
         } catch (JSchException e) {
-            throw new NetconfException(String.format("Error parsing the pemKeyFile: %s", e.getMessage()));
+            throw new NetconfException(String.format("Error parsing the pemKeyFile: %s", e.getMessage()), e);
         }
     }
 
@@ -332,7 +332,7 @@ public class Device implements AutoCloseable {
         try {
             channel = (ChannelExec) sshSession.openChannel("exec");
         } catch (JSchException e) {
-            throw new NetconfException(String.format("Failed to open exec session: %s", e.getMessage()));
+            throw new NetconfException(String.format("Failed to open exec session: %s", e.getMessage()), e);
         }
         channel.setCommand(command);
         InputStream stdout;
@@ -347,7 +347,7 @@ public class Device implements AutoCloseable {
                 try {
                     line = bufferReader.readLine();
                 } catch (Exception e) {
-                    throw new NetconfException(e.getMessage());
+                    throw new NetconfException(e.getMessage(), e);
                 }
                 if (line == null || line.equals(NetconfConstants.EMPTY_LINE))
                     break;
@@ -377,7 +377,7 @@ public class Device implements AutoCloseable {
         try {
             channel = (ChannelExec) sshSession.openChannel("exec");
         } catch (JSchException e) {
-            throw new NetconfException(String.format("Failed to open exec session: %s", e.getMessage()));
+            throw new NetconfException(String.format("Failed to open exec session: %s", e.getMessage()), e);
         }
         InputStream stdout = channel.getInputStream();
         return new BufferedReader(new InputStreamReader(stdout, Charset.defaultCharset()));
