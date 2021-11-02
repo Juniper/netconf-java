@@ -14,6 +14,7 @@ import com.jcraft.jsch.Channel;
 import com.jcraft.jsch.JSchException;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
+import net.juniper.netconf.element.Datastore;
 import net.juniper.netconf.element.Hello;
 import net.juniper.netconf.element.RpcReply;
 import org.w3c.dom.Document;
@@ -159,6 +160,8 @@ public class NetconfSession {
         // RFC conformance for XML type, namespaces and message ids for RPCs
         messageId++;
         rpc = rpc.replace("<rpc>", "<rpc" + getRpcAttributes() + " message-id=\"" + messageId + "\">").trim();
+        rpc = rpc.replace("<datastore>", "<datastore xmlns:ds=\"urn:ietf:params:xml:ns:yang:ietf-datastores\">");
+        rpc = rpc.replace("<get-data>", "<get-data xmlns=\"urn:ietf:params:xml:ns:yang:ietf-netconf-nmda\">");
         if (!rpc.contains(NetconfConstants.XML_VERSION)) {
             rpc = NetconfConstants.XML_VERSION + rpc;
         }
@@ -301,14 +304,28 @@ public class NetconfSession {
         return lastRpcReply;
     }
 
-    public XML getRunningConfigAndState(String filter) throws IOException, SAXException {
+    public XML getRunningConfigAndState(String xpathFilter) throws IOException, SAXException {
         String rpc = "<rpc>" +
                 "<get>" +
-                (filter == null ? "" : filter) +
+                (xpathFilter == null ? "" : xpathFilter) +
                 "</get>" +
                 "</rpc>" +
                 NetconfConstants.DEVICE_PROMPT;
         setLastRpcReply(getRpcReply(rpc));
+        return convertToXML(lastRpcReply);
+    }
+
+    public XML getData(String xpathFilter, @NonNull Datastore datastore)
+            throws IOException, SAXException {
+
+        String rpc = "<rpc>" +
+                "<get-data>" +
+                "<datastore>ds:" + datastore + "</datastore>" +
+                (xpathFilter == null ? "" : xpathFilter) +
+                "</get-data>" +
+                "</rpc>" +
+                NetconfConstants.DEVICE_PROMPT;
+        lastRpcReply = getRpcReply(rpc);
         return convertToXML(lastRpcReply);
     }
 
