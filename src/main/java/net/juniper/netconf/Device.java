@@ -17,6 +17,7 @@ import lombok.Getter;
 import lombok.NonNull;
 import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
+import net.juniper.netconf.element.Datastore;
 import net.juniper.netconf.element.Hello;
 import org.w3c.dom.Document;
 import org.xml.sax.SAXException;
@@ -838,13 +839,40 @@ public class Device implements AutoCloseable {
         return this.netconfSession.getRunningConfig(configTree);
     }
 
-    public XML getRunningConfigAndState(String filter) throws IOException, SAXException {
+    /**
+     * Retrieve the running configuration, or part of the configuration.
+     *
+     * @param xpathFilter example <code><filter xmlns:model='urn:path:for:my:model' select='/model:*'></filter></code>
+     * @return configuration data as XML object.
+     * @throws java.io.IOException      If there are errors communicating with the netconf server.
+     * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
+     */
+    public XML getRunningConfigAndState(String xpathFilter) throws IOException, SAXException {
         if (netconfSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
                     "establish a connection first.");
         }
-        return this.netconfSession.getRunningConfigAndState(filter);
+        return this.netconfSession.getRunningConfigAndState(xpathFilter);
     }
+
+
+    /**
+     * Run the <get-data> call to netconf server and retrieve data as an XML.
+     *
+     * @param xpathFilter example <code><filter xmlns:model='urn:path:for:my:model' select='/model:*'></filter></code>
+     * @param datastore running, startup, candidate, or operational
+     * @return configuration data as XML object.
+     * @throws java.io.IOException      If there are errors communicating with the netconf server.
+     * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
+     */
+    public XML getData(String xpathFilter, @NonNull Datastore datastore) throws IOException, SAXException {
+        if (netconfSession == null) {
+            throw new IllegalStateException("Cannot execute RPC, you need to " +
+                    "establish a connection first.");
+        }
+       return this.netconfSession.getData(xpathFilter, datastore);
+    }
+
 
     /**
      * Retrieve the whole candidate configuration.
