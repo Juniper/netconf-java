@@ -119,24 +119,11 @@ public class NetconfSessionTest {
                 .hasMessage("Command timeout limit was exceeded: 1000");
     }
 
-    @Test
-    public void GIVEN_createSession_WHEN_connectionClose_THEN_throwSocketTimeoutException() {
-        Thread thread = new Thread(() -> {
-            try {
-                outPipe.write(FAKE_RPC_REPLY.getBytes());
-                Thread.sleep(200);
-                outPipe.flush();
-                Thread.sleep(200);
-                outPipe.close();
-            } catch (IOException | InterruptedException e) {
-                log.error("error =", e);
-            }
-        });
-        thread.start();
-
-        assertThatThrownBy(() -> createNetconfSession(COMMAND_TIMEOUT))
-                .isInstanceOf(NetconfException.class)
-                .hasMessage("Input Stream has been closed during reading.");
+    @Test(timeout = 2000)
+    public void GIVEN_createSession_WHEN_noResponseTimeoutExceeded_THEN_throwSocketTimeoutException() {
+        assertThatThrownBy(() -> createNetconfSession(1000))
+                .isInstanceOf(SocketTimeoutException.class)
+                .hasMessage("Command timeout limit was exceeded: 1000");
     }
 
     @Test
@@ -287,35 +274,42 @@ public class NetconfSessionTest {
     @Test
     public void loadTextConfigurationWillSucceedIfResponseIsOk() throws Exception {
 
+        final String hello = "<hello/>";
         final InputStream is = mock(InputStream.class);
-        when(mockChannel.getInputStream())
-            .thenReturn(is);
-        mockResponse(is, "<hello/>");
+        mockChannelInputStream(is, hello, mockChannel);
         final NetconfSession netconfSession = createNetconfSession(100);
 
         final RpcReply rpcReply = RpcReply.builder()
             .ok(true)
             .build();
-        mockResponse(is, rpcReply.getXml());
+        mockChannelInputStream(is, rpcReply.getXml(), mockChannel);
 
         netconfSession.loadTextConfiguration("some config", "some type");
 
         verify(is, times(2)).read(any(), anyInt(), anyInt());
     }
 
+    private void mockChannelInputStream(InputStream is, String replyXml, Channel mockChannel) throws IOException {
+        mockResponse(is, replyXml);
+        when(is.available())
+            .thenReturn((replyXml + NetconfConstants.DEVICE_PROMPT).length())
+            .thenReturn(0);
+        when(mockChannel.getInputStream())
+            .thenReturn(is);
+    }
+
     @Test
     public void loadTextConfigurationWillFailIfResponseIsNotOk() throws Exception {
 
+        final String hello = "<hello/>";
         final InputStream is = mock(InputStream.class);
-        when(mockChannel.getInputStream())
-            .thenReturn(is);
-        mockResponse(is, "<hello/>");
+        mockChannelInputStream(is, hello, mockChannel);
         final NetconfSession netconfSession = createNetconfSession(100);
 
         final RpcReply rpcReply = RpcReply.builder()
             .ok(false)
             .build();
-        mockResponse(is, rpcReply.getXml());
+        mockChannelInputStream(is, rpcReply.getXml(), mockChannel);
 
         assertThrows(LoadException.class,
             () -> netconfSession.loadTextConfiguration("some config", "some type"));
@@ -326,17 +320,16 @@ public class NetconfSessionTest {
     @Test
     public void loadTextConfigurationWillFailIfResponseIsOkWithErrors() throws Exception {
 
+        final String hello = "<hello/>";
         final InputStream is = mock(InputStream.class);
-        when(mockChannel.getInputStream())
-            .thenReturn(is);
-        mockResponse(is, "<hello/>");
+        mockChannelInputStream(is, hello, mockChannel);
         final NetconfSession netconfSession = createNetconfSession(100);
 
         final RpcReply rpcReply = RpcReply.builder()
             .ok(true)
             .error(RpcError.builder().errorSeverity(RpcError.ErrorSeverity.ERROR).build())
             .build();
-        mockResponse(is, rpcReply.getXml());
+        mockChannelInputStream(is, rpcReply.getXml(), mockChannel);
 
         assertThrows(LoadException.class,
             () -> netconfSession.loadTextConfiguration("some config", "some type"));
@@ -347,16 +340,15 @@ public class NetconfSessionTest {
     @Test
     public void loadXmlConfigurationWillSucceedIfResponseIsOk() throws Exception {
 
+        final String hello = "<hello/>";
         final InputStream is = mock(InputStream.class);
-        when(mockChannel.getInputStream())
-            .thenReturn(is);
-        mockResponse(is, "<hello/>");
+        mockChannelInputStream(is, hello, mockChannel);
         final NetconfSession netconfSession = createNetconfSession(100);
 
         final RpcReply rpcReply = RpcReply.builder()
             .ok(true)
             .build();
-        mockResponse(is, rpcReply.getXml());
+        mockChannelInputStream(is, rpcReply.getXml(), mockChannel);
 
         netconfSession.loadXMLConfiguration("some config", "merge");
 
@@ -366,17 +358,16 @@ public class NetconfSessionTest {
     @Test
     public void loadXmlConfigurationWillFailIfResponseIsNotOk() throws Exception {
 
+        final String hello = "<hello/>";
         final InputStream is = mock(InputStream.class);
-        when(mockChannel.getInputStream())
-            .thenReturn(is);
-        mockResponse(is, "<hello/>");
+        mockChannelInputStream(is, hello, mockChannel);
         final NetconfSession netconfSession = createNetconfSession(100);
 
         final RpcReply rpcReply = RpcReply.builder()
             .ok(false)
             .build();
 
-        mockResponse(is, rpcReply.getXml());
+        mockChannelInputStream(is, rpcReply.getXml(), mockChannel);
 
         assertThrows(LoadException.class,
             () -> netconfSession.loadXMLConfiguration("some config", "merge"));
@@ -387,17 +378,16 @@ public class NetconfSessionTest {
     @Test
     public void loadXmlConfigurationWillFailIfResponseIsOkWithErrors() throws Exception {
 
+        final String hello = "<hello/>";
         final InputStream is = mock(InputStream.class);
-        when(mockChannel.getInputStream())
-            .thenReturn(is);
-        mockResponse(is, "<hello/>");
+        mockChannelInputStream(is, hello, mockChannel);
         final NetconfSession netconfSession = createNetconfSession(100);
 
         final RpcReply rpcReply = RpcReply.builder()
             .ok(true)
             .error(RpcError.builder().errorSeverity(RpcError.ErrorSeverity.ERROR).build())
             .build();
-        mockResponse(is, rpcReply.getXml());
+        mockChannelInputStream(is, rpcReply.getXml(), mockChannel);
 
         assertThrows(LoadException.class,
             () -> netconfSession.loadXMLConfiguration("some config", "merge"));
