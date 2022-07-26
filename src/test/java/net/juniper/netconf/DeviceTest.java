@@ -140,14 +140,14 @@ public class DeviceTest {
     public void GIVEN_newDevice_WHEN_withNullUserName_THEN_throwsException() {
         assertThatThrownBy(() -> Device.builder().hostName("foo").build())
                 .isInstanceOf(NullPointerException.class)
-                .hasMessage("userName is marked @NonNull but is null");
+                .hasMessage("userName is marked non-null but is null");
     }
 
     @Test
     public void GIVEN_newDevice_WHEN_withHostName_THEN_throwsException() {
         assertThatThrownBy(() -> Device.builder().userName("foo").build())
                 .isInstanceOf(NullPointerException.class)
-                .hasMessage("hostName is marked @NonNull but is null");
+                .hasMessage("hostName is marked non-null but is null");
     }
 
     @Test
