@@ -10,6 +10,7 @@ import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
+import org.xmlunit.assertj.XmlAssert;
 
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
@@ -26,7 +27,6 @@ import java.nio.file.Files;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -190,7 +190,10 @@ public class NetconfSessionTest {
         Thread.sleep(200);
         String deviceResponse = netconfSession.executeRPC(TestConstants.LLDP_REQUEST).toString();
 
-        assertEquals(expectedResponse, deviceResponse);
+        XmlAssert.assertThat(deviceResponse)
+            .and(expectedResponse)
+            .ignoreWhitespace()
+            .areIdentical();
     }
 
     @Test
