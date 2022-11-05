@@ -92,7 +92,7 @@ public class RpcReply extends AbstractNetconfElement {
             .errors(errorList)
             .originalDocument(document)
             .build();
-        log.info("rpc-reply is: {}", rpcReply.getXml());
+        if (log.isDebugEnabled()) log.debug("rpc-reply is: {}", rpcReply.getXml());
         return (T) rpcReply;
     }
 
