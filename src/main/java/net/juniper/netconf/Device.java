@@ -11,7 +11,10 @@ import com.jcraft.jsch.ChannelExec;
 import com.jcraft.jsch.ChannelSubsystem;
 import com.jcraft.jsch.JSch;
 import com.jcraft.jsch.JSchException;
+import com.jcraft.jsch.ProxyHTTP;
+import com.jcraft.jsch.ProxySOCKS5;
 import com.jcraft.jsch.Session;
+import com.jcraft.jsch.SocketFactory;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NonNull;
@@ -22,6 +25,7 @@ import net.juniper.netconf.element.Hello;
 import org.w3c.dom.Document;
 import org.xml.sax.SAXException;
 
+import javax.net.ssl.SSLSocketFactory;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
@@ -29,6 +33,8 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.Socket;
 import java.nio.charset.Charset;
 import java.util.Arrays;
 import java.util.List;
@@ -228,6 +234,50 @@ public class Device implements AutoCloseable {
             session.setConfig("userauth", "password");
             session.setConfig("StrictHostKeyChecking", isStrictHostKeyChecking() ? "yes" : "no");
             session.setPassword(password);
+
+            final String socksProxyHost = System.getenv("SOCKS_PROXY_HOST");
+            final String socksProxyPort = System.getenv("SOCKS_PROXY_PORT");
+            final String socksProxyUser = System.getenv("SOCKS_PROXY_USER");
+            final String socksProxyPass = System.getenv("SOCKS_PROXY_PASS");
+            if (socksProxyHost != null && socksProxyPort != null && socksProxyUser != null && socksProxyPass != null) {
+                log.info("Using socks5 proxy");
+                final ProxySOCKS5 proxy = new ProxySOCKS5(socksProxyHost, Integer.parseInt(socksProxyPort));
+                proxy.setUserPasswd(socksProxyUser, socksProxyPass);
+                session.setProxy(proxy);
+            }
+            else {
+                final String httpProxyHost = System.getenv("HTTP_PROXY_HOST");
+                final String httpProxyPort = System.getenv("HTTP_PROXY_PORT");
+                final String httpProxyUser = System.getenv("HTTP_PROXY_USER");
+                final String httpProxyPass = System.getenv("HTTP_PROXY_PASS");
+                if(httpProxyHost != null && httpProxyPort != null && httpProxyUser != null && httpProxyPass != null) {
+                    log.info("Using http proxy");
+                    final ProxyHTTP proxy = new ProxyHTTP(httpProxyHost, Integer.parseInt(httpProxyPort));
+                    proxy.setUserPasswd(httpProxyUser, httpProxyPass);
+                    session.setProxy(proxy);
+                    // ProxyHTTP class doesn't know anything about TLS. We are supplying a socket
+                    // factory which takes care of the low level TLS tunnel between the client
+                    // and the proxy server
+                    session.setSocketFactory((new SocketFactory() {
+                        final javax.net.SocketFactory fact = SSLSocketFactory.getDefault();
+                        @Override
+                        public Socket createSocket(String host, int port) throws IOException {
+                            return fact.createSocket(host, port);
+                        }
+
+                        @Override
+                        public InputStream getInputStream(Socket socket) throws IOException {
+                            return socket.getInputStream();
+                        }
+
+                        @Override
+                        public OutputStream getOutputStream(Socket socket) throws IOException {
+                            return socket.getOutputStream();
+                        }
+                    }));
+                }
+            }
+
             session.connect(timeoutMilliSeconds);
             return session;
         } catch (JSchException e) {
