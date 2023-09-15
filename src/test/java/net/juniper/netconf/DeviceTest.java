@@ -1,13 +1,17 @@
 package net.juniper.netconf;
 
+import com.github.stefanbirkner.systemlambda.SystemLambda;
 import com.jcraft.jsch.ChannelSubsystem;
 import com.jcraft.jsch.HostKeyRepository;
 import com.jcraft.jsch.JSch;
 import com.jcraft.jsch.JSchException;
+import com.jcraft.jsch.ProxyHTTP;
+import com.jcraft.jsch.ProxySOCKS5;
 import com.jcraft.jsch.Session;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
+import org.mockito.ArgumentCaptor;
 import org.xmlunit.assertj.XmlAssert;
 
 import java.io.ByteArrayInputStream;
@@ -137,6 +141,90 @@ public class DeviceTest {
     }
 
     @Test
+    public void GIVEN_netConfWithHttpProxy_THEN_setHttpProxy() throws Exception {
+
+        String httpProxyHost = "testHttpProxyHost";
+        String httpProxyPort = "8080";
+        String httpProxyUser = "username";
+        String httpProxyPass = "password";
+        SystemLambda.withEnvironmentVariable("HTTP_PROXY_HOST", httpProxyHost)
+                    .and("HTTP_PROXY_PORT", httpProxyPort)
+                    .and("HTTP_PROXY_USER", httpProxyUser)
+                    .and("HTTP_PROXY_PASS", httpProxyPass)
+                    .execute(() -> {
+                        JSch sshClient = mock(JSch.class);
+                        Session session = mock(Session.class);
+                        HostKeyRepository hostKeyRepository = mock(HostKeyRepository.class);
+
+                        when(sshClient.getSession(eq(TEST_USERNAME), eq(TEST_HOSTNAME),
+                                                  eq(DEFAULT_NETCONF_PORT))).thenReturn(session);
+                        when(sshClient.getHostKeyRepository()).thenReturn(hostKeyRepository);
+
+                        try (Device device = Device.builder()
+                                                   .sshClient(sshClient)
+                                                   .hostName(TEST_HOSTNAME)
+                                                   .userName(TEST_USERNAME)
+                                                   .password(TEST_PASSWORD)
+                                                   .strictHostKeyChecking(false)
+                                                   .build()) {
+                            device.connect();
+                        }
+                        catch (NetconfException e) {
+                            // Do nothing
+                        }
+
+                        ProxyHTTP httpProxy = new ProxyHTTP(httpProxyHost, Integer.parseInt(httpProxyPort));
+                        httpProxy.setUserPasswd(httpProxyUser, httpProxyPass);
+                        ArgumentCaptor<ProxyHTTP> actualProxyCaptor = ArgumentCaptor.forClass(ProxyHTTP.class);
+                        verify(session).setProxy(actualProxyCaptor.capture());
+                        ProxyHTTP actualHttpProxy = actualProxyCaptor.getValue();
+                        assertThat(actualHttpProxy).usingRecursiveComparison().isEqualTo(httpProxy);
+                    });
+    }
+
+    @Test
+    public void GIVEN_netConfWithSocksProxy_THEN_setHttpProxy() throws Exception {
+
+        String socksProxyHost = "testSocksProxyHost";
+        String socksProxyPort = "8080";
+        String socksProxyUser = "username";
+        String socksProxyPass = "password";
+        SystemLambda.withEnvironmentVariable("SOCKS_PROXY_HOST", socksProxyHost)
+                    .and("SOCKS_PROXY_PORT", socksProxyPort)
+                    .and("SOCKS_PROXY_USER", socksProxyUser)
+                    .and("SOCKS_PROXY_PASS", socksProxyPass)
+                    .execute(() -> {
+                        JSch sshClient = mock(JSch.class);
+                        Session session = mock(Session.class);
+                        HostKeyRepository hostKeyRepository = mock(HostKeyRepository.class);
+
+                        when(sshClient.getSession(eq(TEST_USERNAME), eq(TEST_HOSTNAME),
+                                                  eq(DEFAULT_NETCONF_PORT))).thenReturn(session);
+                        when(sshClient.getHostKeyRepository()).thenReturn(hostKeyRepository);
+
+                        try (Device device = Device.builder()
+                                                   .sshClient(sshClient)
+                                                   .hostName(TEST_HOSTNAME)
+                                                   .userName(TEST_USERNAME)
+                                                   .password(TEST_PASSWORD)
+                                                   .strictHostKeyChecking(false)
+                                                   .build()) {
+                            device.connect();
+                        }
+                        catch (NetconfException e) {
+                            // Do nothing
+                        }
+
+                        ProxySOCKS5 socksProxy = new ProxySOCKS5(socksProxyHost, Integer.parseInt(socksProxyPort));
+                        socksProxy.setUserPasswd(socksProxyUser, socksProxyPass);
+                        ArgumentCaptor<ProxySOCKS5> actualProxyCaptor = ArgumentCaptor.forClass(ProxySOCKS5.class);
+                        verify(session).setProxy(actualProxyCaptor.capture());
+                        ProxySOCKS5 actualSocksProxy = actualProxyCaptor.getValue();
+                        assertThat(actualSocksProxy).usingRecursiveComparison().isEqualTo(socksProxy);
+                    });
+    }
+
+    @Test
     public void GIVEN_newDevice_WHEN_withNullUserName_THEN_throwsException() {
         assertThatThrownBy(() -> Device.builder().hostName("foo").build())
                 .isInstanceOf(NullPointerException.class)
@@ -222,4 +310,5 @@ public class DeviceTest {
             .thenReturn(sshSession);
         return sshClient;
     }
+
 }
