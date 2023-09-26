@@ -40,7 +40,7 @@ import static org.mockito.Mockito.when;
 
 @Slf4j
 @Category(Test.class)
-public class NetconfSessionTest {
+public class SecondNetconfSessionTest {
 
     public static final int CONNECTION_TIMEOUT = 2000;
     public static final int COMMAND_TIMEOUT = 5000;
@@ -72,39 +72,37 @@ public class NetconfSessionTest {
         PipedInputStream pipeInput = new PipedInputStream(1024);
         out = new BufferedOutputStream(new PipedOutputStream(pipeInput));
 
+    }
+
+    @Test
+    public void GIVEN_getCandidateConfig_WHEN_syntaxError_THEN_throwNetconfException() throws Exception {
+        when(mockNetconfSession.getCandidateConfig()).thenCallRealMethod();
+        when(mockNetconfSession.getRpcReply(anyString())).thenReturn(NETCONF_SYNTAX_ERROR_MSG_FROM_DEVICE);
+
+        assertThatThrownBy(mockNetconfSession::getCandidateConfig)
+                .isInstanceOf(NetconfException.class)
+                .hasMessage("Invalid <rpc-reply> message from server: netconf error: syntax error");
+    }
+
+    @Test
+    public void GIVEN_getRunningConfig_WHEN_syntaxError_THEN_throwNetconfException() throws Exception {
+        when(mockNetconfSession.getRunningConfig()).thenCallRealMethod();
+        when(mockNetconfSession.getRpcReply(anyString())).thenReturn(NETCONF_SYNTAX_ERROR_MSG_FROM_DEVICE);
+
+        assertThatThrownBy(mockNetconfSession::getRunningConfig)
+                .isInstanceOf(NetconfException.class)
+                .hasMessage("Invalid <rpc-reply> message from server: netconf error: syntax error");
+    }
+
+    @Test
+    public void GIVEN_createSession_WHEN_devicePromptWithoutLF_THEN_correctResponse() throws Exception {
         when(mockChannel.getInputStream()).thenReturn(inPipe);
         when(mockChannel.getOutputStream()).thenReturn(out);
-    }
 
-
-    @Test
-    public void GIVEN_createSession_WHEN_timeoutExceeded_THEN_throwSocketTimeoutException() {
         Thread thread = new Thread(() -> {
             try {
                 outPipe.write(FAKE_RPC_REPLY.getBytes());
-                for (int i = 0; i < 7; i++) {
-                    outPipe.write(FAKE_RPC_REPLY.getBytes());
-                    Thread.sleep(200);
-                    outPipe.flush();
-                }
-                Thread.sleep(200);
-                outPipe.close();
-            } catch (IOException | InterruptedException e) {
-                log.error("error =", e);
-            }
-        });
-        thread.start();
-
-        assertThatThrownBy(() -> createNetconfSession(1000))
-                .isInstanceOf(SocketTimeoutException.class)
-                .hasMessage("Command timeout limit was exceeded: 1000");
-    }
-
-    @Test
-    public void GIVEN_createSession_WHEN_connectionClose_THEN_throwSocketTimeoutException() {
-        Thread thread = new Thread(() -> {
-            try {
-                outPipe.write(FAKE_RPC_REPLY.getBytes());
+                outPipe.write(DEVICE_PROMPT_BYTE);
                 Thread.sleep(200);
                 outPipe.flush();
                 Thread.sleep(200);
@@ -115,45 +113,45 @@ public class NetconfSessionTest {
         });
         thread.start();
 
-        assertThatThrownBy(() -> createNetconfSession(COMMAND_TIMEOUT))
+        createNetconfSession(COMMAND_TIMEOUT);
+    }
+
+    @Test
+    public void GIVEN_executeRPC_WHEN_syntaxError_THEN_throwNetconfException() throws Exception {
+        when(mockNetconfSession.executeRPC(eq(TestConstants.LLDP_REQUEST))).thenCallRealMethod();
+        when(mockNetconfSession.getRpcReply(anyString())).thenReturn(NETCONF_SYNTAX_ERROR_MSG_FROM_DEVICE);
+
+        assertThatThrownBy(() -> mockNetconfSession.executeRPC(TestConstants.LLDP_REQUEST))
                 .isInstanceOf(NetconfException.class)
-                .hasMessage("Input Stream has been closed during reading.");
+                .hasMessage("Invalid <rpc-reply> message from server: netconf error: syntax error");
     }
 
     @Test
-    public void GIVEN_executeRPC_WHEN_lldpRequest_THEN_correctResponse() throws Exception {
-        byte[] lldpResponse = Files.readAllBytes(TestHelper.getSampleFile("responses/lldpResponse.xml").toPath());
-        String expectedResponse = new String(lldpResponse, Charsets.UTF_8)
-                .replaceAll(NetconfConstants.CR, NetconfConstants.EMPTY_LINE) + NetconfConstants.LF;
-
-        Thread thread = new Thread(() -> {
-            try {
-                outPipe.write(FAKE_RPC_REPLY.getBytes());
-                outPipe.write(DEVICE_PROMPT_BYTE);
-                outPipe.flush();
-                Thread.sleep(800);
-                outPipe.write(lldpResponse);
-                outPipe.flush();
-                Thread.sleep(700);
-                outPipe.write(DEVICE_PROMPT_BYTE);
-                outPipe.flush();
-                Thread.sleep(1900);
-                outPipe.close();
-            } catch (IOException | InterruptedException e) {
-                log.error("error =", e);
-            }
-        });
-        thread.start();
-
-        NetconfSession netconfSession = createNetconfSession(COMMAND_TIMEOUT);
-        Thread.sleep(200);
-        String deviceResponse = netconfSession.executeRPC(TestConstants.LLDP_REQUEST).toString();
-
-        XmlAssert.assertThat(deviceResponse)
-            .and(expectedResponse)
-            .ignoreWhitespace()
-            .areIdentical();
+    public void GIVEN_stringWithoutRPC_fixupRPC_THEN_returnStringWrappedWithRPCTags() {
+        assertThat(NetconfSession.fixupRpc("fake string"))
+                .isEqualTo("<rpc><fake string/></rpc>" + DEVICE_PROMPT);
     }
+
+    @Test
+    public void GIVEN_stringWithRPCTags_fixupRPC_THEN_returnWrappedString() {
+        assertThat(NetconfSession.fixupRpc("<rpc>fake string</rpc>"))
+                .isEqualTo("<rpc>fake string</rpc>" + DEVICE_PROMPT);
+    }
+
+    @Test
+    public void GIVEN_stringWithTag_fixupRPC_THEN_returnWrappedString() {
+        assertThat(NetconfSession.fixupRpc("<fake string/>"))
+                .isEqualTo("<rpc><fake string/></rpc>" + DEVICE_PROMPT);
+    }
+
+    @Test
+    public void GIVEN_nullString_WHEN_fixupRPC_THEN_throwException() {
+        //noinspection ConstantConditions
+        assertThatThrownBy(() -> NetconfSession.fixupRpc(null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Null RPC");
+    }
+
     private NetconfSession createNetconfSession(int commandTimeout) throws IOException {
         DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
         try {
