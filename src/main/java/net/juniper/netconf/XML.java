@@ -9,6 +9,9 @@
 package net.juniper.netconf;
 
 import com.google.common.base.Preconditions;
+
+import javax.xml.XMLConstants;
+
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
@@ -504,6 +507,8 @@ public class XML {
         String str;
         try {
             TransformerFactory transFactory = TransformerFactory.newInstance();
+            transFactory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD,"");
+            transFactory.setAttribute(XMLConstants.ACCESS_EXTERNAL_STYLESHEET,"");
             Transformer transformer = transFactory.newTransformer();
             StringWriter buffer = new StringWriter();
             transformer.setOutputProperty(OutputKeys.DOCTYPE_PUBLIC,"yes");
