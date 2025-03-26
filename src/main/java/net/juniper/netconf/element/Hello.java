@@ -72,7 +72,7 @@ public class Hello extends AbstractNetconfElement {
             builder.capability(node.getTextContent());
         }
         final Hello hello = builder.build();
-        log.info("hello is: {}", hello.getXml());
+        if (log.isDebugEnabled()) log.debug("hello is: {}", hello.getXml());
         return hello;
     }
 
