@@ -136,9 +136,10 @@ public class NetconfSession {
         int promptPosition;
         while ((promptPosition = rpcReply.indexOf(NetconfConstants.DEVICE_PROMPT)) < 0 &&
                 (timeoutNotExceeded = (TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startTime) < commandTimeout))) {
-            int charsRead = in.read(buffer, 0, buffer.length);
-            if (charsRead < 0) throw new NetconfException("Input Stream has been closed during reading.");
-            rpcReply.append(buffer, 0, charsRead);
+            if (in.ready()) {
+                int charsRead = in.read(buffer, 0, buffer.length);
+                rpcReply.append(buffer, 0, charsRead);
+            }
         }
 
         if (!timeoutNotExceeded)
