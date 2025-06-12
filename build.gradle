@@ -1,0 +1,107 @@
+plugins {
+    id 'java'
+    id 'jacoco'
+    id 'maven-publish'
+    id 'com.github.spotbugs' version '6.0.6'
+}
+
+group = 'net.juniper.netconf'
+version = '2.2.0.0'
+description = 'An API For NetConf client'
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+    withJavadocJar()
+    withSourcesJar()
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'com.jcraft:jsch:0.1.55'
+    implementation 'org.slf4j:slf4j-api:2.0.3'
+    implementation 'com.google.guava:guava:32.0.1-jre'
+
+    testImplementation 'org.hamcrest:hamcrest-all:1.3'
+    testImplementation 'org.assertj:assertj-core:3.23.1'
+    testImplementation 'org.mockito:mockito-core:4.8.1'
+    testImplementation 'commons-io:commons-io:2.14.0'
+    testImplementation 'org.xmlunit:xmlunit-assertj:2.9.0'
+    testImplementation 'org.slf4j:slf4j-simple:2.0.3'
+    testImplementation 'com.github.spotbugs:spotbugs-annotations:4.7.3'
+
+}
+
+testing {
+    suites {
+        test {
+            // Pulls in both junit-jupiter-api and -engine at version 5.11.1
+            useJUnitJupiter('5.11.1')
+        }
+    }
+}
+
+test {
+    testLogging {
+        events "passed", "skipped", "failed"
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.fork = true
+    options.forkOptions.jvmArgs += [
+        '--add-opens=jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED',
+        '--add-opens=jdk.compiler/com.sun.tools.javac.comp=ALL-UNNAMED',
+        '--add-opens=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED',
+        '--add-opens=jdk.compiler/com.sun.tools.javac.main=ALL-UNNAMED',
+        '--add-opens=jdk.compiler/com.sun.tools.javac.model=ALL-UNNAMED',
+        '--add-opens=jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED',
+        '--add-opens=jdk.compiler/com.sun.tools.javac.processing=ALL-UNNAMED',
+        '--add-opens=jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED',
+        '--add-opens=jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED',
+        '--add-opens=jdk.compiler/com.sun.tools.javac.jvm=ALL-UNNAMED'
+    ]
+}
+
+spotbugs {
+    ignoreFailures = true
+}
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            from components.java
+            pom {
+                name.set("$group:$project.name")
+                description.set(project.description)
+                url.set("https://github.com/Juniper/netconf-java")
+
+                licenses {
+                    license {
+                        name.set("BSD 2")
+                        url.set("https://opensource.org/licenses/BSD-2-Clause")
+                    }
+                }
+
+                developers {
+                    developer {
+                        id.set("juniper")
+                        name.set("Juniper Networks")
+                        email.set("jnpr-community-netdev@juniper.net")
+                        organization.set("Juniper Networks")
+                        organizationUrl.set("https://github.com/Juniper")
+                    }
+                }
+
+                scm {
+                    connection.set("scm:git:git://github.com/Juniper/netconf-java.git")
+                    developerConnection.set("scm:git:ssh://github.com:Juniper/netconf-java.git")
+                    url.set("https://github.com/Juniper/netconf-java/tree/master")
+                }
+            }
+        }
+    }
+}

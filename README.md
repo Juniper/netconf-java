@@ -1,6 +1,8 @@
 netconf-java
 ============
 
+**A modernized Java library for NETCONF (now Java 17‑compatible)**
+
 Java library for NETCONF
 
 SUPPORT
@@ -13,12 +15,24 @@ or even better submit pull requests on GitHub.
 REQUIREMENTS
 ============
 
-[OpenJDK 8](http://openjdk.java.net/projects/jdk8/) or Java 8
-[Maven](https://maven.apache.org/download.cgi) if you want to build using `mvn` [Supported from v2.1.1].
+* [OpenJDK 17](https://openjdk.org/projects/jdk/17/) or later
+* [Maven](https://maven.apache.org/download.cgi) if you want to build using `mvn` [Supported from v2.1.1].
+* [Gradle 8+](https://gradle.org/releases/) if you prefer a Gradle build (`./gradlew build`)
 
-[Maven](https://maven.apache.org/download.cgi) if you want to build using `mvn` [Supported from v2.1.1].
+Building
+========
+You can build the project using **Maven** or **Gradle**.
 
-[lombok](https://mvnrepository.com/artifact/org.projectlombok/lombok) needs to be provided by the runtime (`mvn dependency scope` is set as `provided`)
+### Maven
+```bash
+mvn clean package
+```
+
+### Gradle
+```bash
+./gradlew clean build
+```
+(The wrapper script downloads the correct Gradle version automatically.)
 
 Releases
 ========
@@ -37,6 +51,17 @@ User may download the source code and compile it with desired JDK version.
   * Use `mvn versions:display-dependency-updates` to identify possible target versions for dependencies
   
 =======
+
+v2.2.0
+------
+* Java 17 baseline; compiled with `--release 17`
+* Gradle build added alongside Maven
+* SpotBugs upgraded to 6.x
+* Added **:confirmed-commit:1.1** support (`commitConfirm(timeout, persist)` and `cancelCommit(persistId)`)
+* Added **killSession(String)** helper for RFC 6241 §7.9
+* Auto‑inject base 1.1 capability in &lt;hello&gt; exchange
+* Gradle wrapper committed; GitHub Actions now builds Maven *and* Gradle
+* Expanded Javadoc and SpotBugs clean‑up
 
 v2.1.1
 ------
@@ -59,6 +84,7 @@ Example:
 Device device = Device.builder().hostName("hostname")
     .userName("username")
     .password("password")
+    .connectionTimeout(2000)
     .hostKeysFileName("hostKeysFileName")
     .build();
 ```
@@ -84,6 +110,7 @@ public class ShowInterfaces {
                             .hostName("hostname")
                             .userName("username")
                             .password("password")
+                            .connectionTimeout(2000)
                             .hostKeysFileName("hostKeysFileName")
                             .build(); 
         device.connect();
@@ -127,3 +154,4 @@ AUTHOR
 
 [Ankit Jain](http://www.linkedin.com/in/ankitj093), Juniper Networks
 [Peter J Hill](https://github.com/peterjhill), Oracle
+[Community Contributors](https://github.com/Juniper/netconf-java/graphs/contributors)

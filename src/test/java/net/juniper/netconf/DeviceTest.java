@@ -5,9 +5,8 @@ import com.jcraft.jsch.HostKeyRepository;
 import com.jcraft.jsch.JSch;
 import com.jcraft.jsch.JSchException;
 import com.jcraft.jsch.Session;
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.experimental.categories.Category;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.xmlunit.assertj.XmlAssert;
 
 import java.io.ByteArrayInputStream;
@@ -15,11 +14,10 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNull;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
@@ -29,31 +27,37 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
-@Category(Test.class)
 public class DeviceTest {
 
     private static final String TEST_HOSTNAME = "hostname";
     private static final String TEST_USERNAME = "username";
     private static final String TEST_PASSWORD = "password";
     private static final int DEFAULT_NETCONF_PORT = 830;
+    private static final int OTHER_NETCONF_PORT = 990;
     private static final int DEFAULT_TIMEOUT = 5000;
+    private static final int OTHER_TIMEOUT = 1000;
+    private static final String TEST_FILENAME = "TEST_FILENAME";
     private static final String SUBSYSTEM = "subsystem";
-    private static final String HELLO_WITH_DEFAULT_CAPABILITIES = "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
-        + "<hello xmlns=\"urn:ietf:params:xml:ns:netconf:base:1.0\">\n"
-        + "<capabilities>\n"
-        + "<capability>urn:ietf:params:netconf:base:1.0</capability>\n"
-        + "<capability>urn:ietf:params:netconf:base:1.0#candidate</capability>\n"
-        + "<capability>urn:ietf:params:netconf:base:1.0#confirmed-commit</capability>\n"
-        + "<capability>urn:ietf:params:netconf:base:1.0#validate</capability>\n"
-        + "<capability>urn:ietf:params:netconf:base:1.0#url?protocol=http,ftp,file</capability>\n"
-        + "</capabilities>\n"
-        + "</hello>";
-    private static final String HELLO_WITH_BASE_CAPABILITIES = "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
-        + "<hello xmlns=\"urn:ietf:params:xml:ns:netconf:base:1.0\">\n"
-        + "<capabilities>\n"
-        + "<capability>urn:ietf:params:netconf:base:1.0</capability>\n"
-        + "</capabilities>\n"
-        + "</hello>";
+    private static final String HELLO_WITH_DEFAULT_CAPABILITIES = """
+        <?xml version="1.0" encoding="utf-8"?>\
+        <hello xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+        <capabilities>
+        <capability>urn:ietf:params:netconf:base:1.0</capability>
+        <capability>urn:ietf:params:netconf:base:1.0#candidate</capability>
+        <capability>urn:ietf:params:netconf:base:1.0#confirmed-commit</capability>
+        <capability>urn:ietf:params:netconf:base:1.0#validate</capability>
+        <capability>urn:ietf:params:netconf:base:1.0#url?protocol=http,ftp,file</capability>
+        <capability>urn:ietf:params:netconf:base:1.1</capability>
+        </capabilities>
+        </hello>""";
+    private static final String HELLO_WITH_BASE_CAPABILITIES = """
+        <?xml version="1.0" encoding="utf-8"?>\
+        <hello xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+        <capabilities>
+        <capability>urn:ietf:params:netconf:base:1.0</capability>
+        <capability>urn:ietf:params:netconf:base:1.1</capability>
+        </capabilities>
+        </hello>""";
 
     private ByteArrayOutputStream outputStream;
 
@@ -66,7 +70,7 @@ public class DeviceTest {
                 .build();
     }
 
-    @Before
+    @BeforeEach
     public void setUp() {
         outputStream = new ByteArrayOutputStream();
     }
@@ -80,9 +84,36 @@ public class DeviceTest {
         assertThat(device.getPort()).isEqualTo(DEFAULT_NETCONF_PORT);
         assertThat(device.getConnectionTimeout()).isEqualTo(DEFAULT_TIMEOUT);
         assertThat(device.getCommandTimeout()).isEqualTo(DEFAULT_TIMEOUT);
-        assertFalse(device.isKeyBasedAuthentication());
-        assertNull(device.getPemKeyFile());
-        assertNull(device.getHostKeysFileName());
+        assertThat(device.isKeyBasedAuthentication()).isFalse();
+        assertThat(device.getPemKeyFile()).isNull();
+        assertThat(device.getHostKeysFileName()).isNull();
+    }
+
+    @Test
+    public void GIVEN_deviceBuilder_THEN_buildDevice() throws NetconfException {
+        Device device = Device.builder()
+            .hostName(TEST_HOSTNAME)
+            .userName(TEST_USERNAME)
+            .password(TEST_PASSWORD)
+            .port(OTHER_NETCONF_PORT)
+            .pemKeyFile(TEST_FILENAME)
+            .connectionTimeout(OTHER_TIMEOUT)
+            .commandTimeout(OTHER_TIMEOUT)
+            .keyBasedAuth(TEST_FILENAME)
+            .hostKeysFileName(TEST_FILENAME)
+            .build();
+        assertThat(device.getHostName()).isEqualTo(TEST_HOSTNAME);
+        assertThat(device.getUserName()).isEqualTo(TEST_USERNAME);
+        assertThat(device.getPassword()).isEqualTo(TEST_PASSWORD);
+        assertThat(device.getPort()).isEqualTo(OTHER_NETCONF_PORT);
+        assertThat(device.getConnectionTimeout()).isEqualTo(OTHER_TIMEOUT);
+        assertThat(device.getCommandTimeout()).isEqualTo(OTHER_TIMEOUT);
+        assertThat(device.isKeyBasedAuthentication()).isTrue();
+        assertThat(device.getPemKeyFile()).isEqualTo(TEST_FILENAME);
+        assertThat(device.getHostKeysFileName()).isEqualTo(TEST_FILENAME);
+        List<String> caps = device.getDefaultClientCapabilities();
+        assertThat(caps).isNotNull();
+        assertThat(caps).contains("urn:ietf:params:netconf:base:1.0");
     }
 
     @Test
@@ -139,21 +170,21 @@ public class DeviceTest {
     @Test
     public void GIVEN_newDevice_WHEN_withNullUserName_THEN_throwsException() {
         assertThatThrownBy(() -> Device.builder().hostName("foo").build())
-                .isInstanceOf(NullPointerException.class)
-                .hasMessage("userName is marked non-null but is null");
+                .isInstanceOf(NetconfException.class)
+                .hasMessage("userName is required");
     }
 
     @Test
     public void GIVEN_newDevice_WHEN_withHostName_THEN_throwsException() {
         assertThatThrownBy(() -> Device.builder().userName("foo").build())
-                .isInstanceOf(NullPointerException.class)
-                .hasMessage("hostName is marked non-null but is null");
+                .isInstanceOf(NetconfException.class)
+                .hasMessage("hostName is required");
     }
 
     @Test
     public void GIVEN_newDevice_WHEN_checkIfConnected_THEN_returnFalse() throws NetconfException {
         Device device = createTestDevice();
-        assertFalse(device.isConnected());
+        assertThat(device.isConnected()).isFalse();
     }
 
     @Test
@@ -170,7 +201,7 @@ public class DeviceTest {
             .build();
         device.connect();
 
-        final String message = outputStream.toString();
+        final String message = outputStream.toString(StandardCharsets.UTF_8);
         assertThat(message).endsWith(NetconfConstants.DEVICE_PROMPT);
         final String hello = message.substring(0, message.length() - NetconfConstants.DEVICE_PROMPT.length());
         XmlAssert.assertThat(hello)
@@ -194,7 +225,7 @@ public class DeviceTest {
             .build();
         device.connect();
 
-        final String message = outputStream.toString();
+        final String message = outputStream.toString(StandardCharsets.UTF_8);
         assertThat(message).endsWith(NetconfConstants.DEVICE_PROMPT);
         final String hello = message.substring(0, message.length() - NetconfConstants.DEVICE_PROMPT.length());
         XmlAssert.assertThat(hello)

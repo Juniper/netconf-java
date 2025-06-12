@@ -1,10 +1,8 @@
 package net.juniper.netconf;
 
-import org.junit.Test;
-import org.junit.experimental.categories.Category;
+import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-@Category(Test.class)
 public class LoadExceptionTest {
 
     private static final String TEST_MESSAGE = "test message";

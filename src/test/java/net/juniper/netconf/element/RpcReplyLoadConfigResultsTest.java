@@ -1,29 +1,31 @@
 package net.juniper.netconf.element;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.xmlunit.assertj.XmlAssert;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 public class RpcReplyLoadConfigResultsTest {
 
-    private static final String LOAD_CONFIG_RESULTS_OK_NO_NAMESPACE = ""
-        + "<rpc-reply xmlns=\"urn:ietf:params:xml:ns:netconf:base:1.0\"" +
-        "             xmlns:junos=\"http://xml.juniper.net/junos/20.4R0/junos\"" +
-        "             message-id=\"3\">\n" +
-        "    <load-configuration-results action=\"set\">\n" +
-        "        <ok/>\n" +
-        "    </load-configuration-results>\n" +
-        "</rpc-reply>";
+    private static final String LOAD_CONFIG_RESULTS_OK_NO_NAMESPACE = """
+        \
+        <rpc-reply xmlns="urn:ietf:params:xml:ns:netconf:base:1.0"\
+                     xmlns:junos="http://xml.juniper.net/junos/20.4R0/junos"\
+                     message-id="3">
+            <load-configuration-results action="set">
+                <ok/>
+            </load-configuration-results>
+        </rpc-reply>""";
 
-    private static final String LOAD_CONFIG_RESULTS_OK_WITH_NAMESPACE = ""
-        + "<nc:rpc-reply xmlns:nc=\"urn:ietf:params:xml:ns:netconf:base:1.0\"" +
-        "                   xmlns:junos=\"http://xml.juniper.net/junos/20.4R0/junos\"" +
-        "                   message-id=\"4\">\n" +
-        "    <load-configuration-results action=\"set\">\n" +
-        "        <nc:ok/>\n" +
-        "    </load-configuration-results>\n" +
-        "</nc:rpc-reply>";
+    private static final String LOAD_CONFIG_RESULTS_OK_WITH_NAMESPACE = """
+        \
+        <nc:rpc-reply xmlns:nc="urn:ietf:params:xml:ns:netconf:base:1.0"\
+                           xmlns:junos="http://xml.juniper.net/junos/20.4R0/junos"\
+                           message-id="4">
+            <load-configuration-results action="set">
+                <nc:ok/>
+            </load-configuration-results>
+        </nc:rpc-reply>""";
 
     private static final String LOAD_CONFIG_RESULTS_ERROR_NO_NAMESPACE = ""
         + "<rpc-reply xmlns=\"urn:ietf:params:xml:ns:netconf:base:1.0\"" +
@@ -43,23 +45,25 @@ public class RpcReplyLoadConfigResultsTest {
         "    </load-configuration-results>\n" +
         "</rpc-reply>\n";
 
-    private static final String LOAD_CONFIG_RESULTS_ERROR_WITH_NAMESPACE = ""
-        + "<nc:rpc-reply xmlns:nc=\"urn:ietf:params:xml:ns:netconf:base:1.0\"" +
-        "                   xmlns:junos=\"http://xml.juniper.net/junos/20.4R0/junos\"\n" +
-        "                   message-id=\"6\">\n" +
-        "    <load-configuration-results action=\"set\">\n" +
-        "        <nc:rpc-error>\n" +
-        "            <nc:error-type>protocol</nc:error-type>\n" +
-        "            <nc:error-tag>operation-failed</nc:error-tag>\n" +
-        "            <nc:error-severity>error</nc:error-severity>\n" +
-        "            <nc:error-message>syntax error</nc:error-message>\n" +
-        "            <nc:error-info>\n" +
-        "                <nc:bad-element>foobar</nc:bad-element>\n" +
-        "            </nc:error-info>\n" +
-        "        </nc:rpc-error>\n" +
-        "        <nc:ok/>\n" +
-        "    </load-configuration-results>\n" +
-        "</nc:rpc-reply>\n";
+    private static final String LOAD_CONFIG_RESULTS_ERROR_WITH_NAMESPACE = """
+        \
+        <nc:rpc-reply xmlns:nc="urn:ietf:params:xml:ns:netconf:base:1.0"\
+                           xmlns:junos="http://xml.juniper.net/junos/20.4R0/junos"
+                           message-id="6">
+            <load-configuration-results action="set">
+                <nc:rpc-error>
+                    <nc:error-type>protocol</nc:error-type>
+                    <nc:error-tag>operation-failed</nc:error-tag>
+                    <nc:error-severity>error</nc:error-severity>
+                    <nc:error-message>syntax error</nc:error-message>
+                    <nc:error-info>
+                        <nc:bad-element>foobar</nc:bad-element>
+                    </nc:error-info>
+                </nc:rpc-error>
+                <nc:ok/>
+            </load-configuration-results>
+        </nc:rpc-reply>
+        """;
 
     @Test
     public void willParseAnOkResponseWithNoNamespacePrefix() throws Exception {
@@ -70,7 +74,7 @@ public class RpcReplyLoadConfigResultsTest {
             .isEqualTo("3");
         assertThat(rpcReply.getAction())
             .isEqualTo("set");
-        assertThat(rpcReply.isOk())
+        assertThat(rpcReply.isOK())
             .isTrue();
         assertThat(rpcReply.hasErrorsOrWarnings())
             .isFalse();
@@ -92,7 +96,7 @@ public class RpcReplyLoadConfigResultsTest {
             .isEqualTo("4");
         assertThat(rpcReply.getAction())
             .isEqualTo("set");
-        assertThat(rpcReply.isOk())
+        assertThat(rpcReply.isOK())
             .isTrue();
         assertThat(rpcReply.hasErrorsOrWarnings())
             .isFalse();
@@ -114,7 +118,7 @@ public class RpcReplyLoadConfigResultsTest {
             .isEqualTo("5");
         assertThat(rpcReply.getAction())
             .isEqualTo("set");
-        assertThat(rpcReply.isOk())
+        assertThat(rpcReply.isOK())
             .isTrue();
         assertThat(rpcReply.hasErrorsOrWarnings())
             .isTrue();
@@ -143,7 +147,7 @@ public class RpcReplyLoadConfigResultsTest {
             .isEqualTo("6");
         assertThat(rpcReply.getAction())
             .isEqualTo("set");
-        assertThat(rpcReply.isOk())
+        assertThat(rpcReply.isOK())
             .isTrue();
         assertThat(rpcReply.hasErrorsOrWarnings())
             .isTrue();
@@ -201,7 +205,7 @@ public class RpcReplyLoadConfigResultsTest {
             .messageId("5")
             .action("set")
             .ok(true)
-            .error(RpcError.builder()
+            .addError(RpcError.builder()
                 .errorType(RpcError.ErrorType.PROTOCOL)
                 .errorTag(RpcError.ErrorTag.OPERATION_FAILED)
                 .errorSeverity(RpcError.ErrorSeverity.ERROR)
@@ -226,7 +230,7 @@ public class RpcReplyLoadConfigResultsTest {
             .messageId("6")
             .action("set")
             .ok(true)
-            .error(RpcError.builder()
+            .addError(RpcError.builder()
                 .errorType(RpcError.ErrorType.PROTOCOL)
                 .errorTag(RpcError.ErrorTag.OPERATION_FAILED)
                 .errorSeverity(RpcError.ErrorSeverity.ERROR)

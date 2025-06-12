@@ -12,8 +12,6 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Charsets;
 import com.jcraft.jsch.Channel;
 import com.jcraft.jsch.JSchException;
-import lombok.NonNull;
-import lombok.extern.slf4j.Slf4j;
 import net.juniper.netconf.element.Datastore;
 import net.juniper.netconf.element.Hello;
 import net.juniper.netconf.element.RpcReply;
@@ -44,23 +42,23 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 /**
- * A <code>NetconfSession</code> object is used to call the Netconf driver
- * methods.
- * This is derived by creating a Device first,
- * and calling createNetconfSession().
+ * A {@code NetconfSession} is obtained by first building a
+ * {@link Device} and then calling {@link Device#connect()}.
  * <p>
  * Typically, one
  * <ol>
- * <li>creates a Device object.</li>
- * <li>calls the createNetconfSession() method to get a NetconfSession
- * object.</li>
- * <li>perform operations on the NetconfSession object.</li>
- * <li>finally, one must close the NetconfSession and release resources with
- * the {@link #close() close()} method.</li>
+ *   <li>Build a {@link Device} using its fluent {@code builder()}.</li>
+ *   <li>Invoke {@link Device#connect()} to establish transport and receive a
+ *       {@code NetconfSession}.</li>
+ *   <li>Perform RPC operations via the session
+ *       (e.g.&nbsp;{@link #executeRPC(String)}, {@link #killSession(String)},
+ *       {@link #commitConfirm(long, String)}, {@link #cancelCommit(String)}).</li>
+ *   <li>Call {@link #close()} when finished to free resources.</li>
  * </ol>
  */
-@Slf4j
 public class NetconfSession {
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(NetconfSession.class);
 
     private final Channel netconfChannel;
     private String serverCapability;
@@ -78,7 +76,12 @@ public class NetconfSession {
     private String rpcAttributes;
 
     private int messageId = 0;
-    // Bigger than inner buffer in BufferReader class
+    /**
+     * Size (in characters) of the temporary read buffer used when collecting
+     * RPC replies from the device.  Set larger than the internal buffer in
+     * {@link java.io.BufferedReader} so that large replies are less likely to
+     * require multiple passes.
+     */
     public static final int BUFFER_SIZE = 9 * 1024;
 
     private static final String CANDIDATE_CONFIG = "candidate";
@@ -226,9 +229,16 @@ public class NetconfSession {
                 "</edit-config>" +
                 "</rpc>" +
                 NetconfConstants.DEVICE_PROMPT;
-        setLastRpcReply(getRpcReply(rpc));
-        if (hasError() || !isOK())
+        try {
+            setLastRpcReply(getRpcReply(rpc));
+        } catch (NetconfException e) {
+            // Propagate as a LoadException so the caller knows this happened
+            throw new LoadException("Load operation returned error.", e);
+        }
+
+        if (hasError() || !isOK()) {
             throw new LoadException("Load operation returned error.");
+        }
     }
 
     private void setHelloReply(final String reply) throws IOException {
@@ -282,9 +292,15 @@ public class NetconfSession {
                 "</edit-config>" +
                 "</rpc>" +
                 NetconfConstants.DEVICE_PROMPT;
-        setLastRpcReply(getRpcReply(rpc));
-        if (hasError() || !isOK())
+        try {
+            setLastRpcReply(getRpcReply(rpc));
+        } catch (NetconfException e) {
+            throw new LoadException("Load operation returned error.", e);
+        }
+
+        if (hasError() || !isOK()) {
             throw new LoadException("Load operation returned error");
+        }
     }
 
     private String getConfig(String configTree) throws IOException {
@@ -304,6 +320,16 @@ public class NetconfSession {
         return lastRpcReply;
     }
 
+    /**
+     * Executes a NETCONF {@code &lt;get&gt;} operation against the device’s running
+     * datastore and returns the configuration **and** operational state data.
+     *
+     * @param xpathFilter optional XPath filter to limit the returned subtree;
+     *                    pass {@code null} to retrieve the entire running state
+     * @return an {@link XML} object representing the server’s {@code &lt;rpc-reply&gt;}
+     * @throws IOException  if communication with the device fails
+     * @throws SAXException if the reply cannot be parsed into valid XML
+     */
     public XML getRunningConfigAndState(String xpathFilter) throws IOException, SAXException {
         String rpc = "<rpc>" +
                 "<get>" +
@@ -315,9 +341,24 @@ public class NetconfSession {
         return convertToXML(lastRpcReply);
     }
 
-    public XML getData(String xpathFilter, @NonNull Datastore datastore)
+    /**
+     * Executes the YANG NMDA {@code &lt;get-data&gt;} operation against the specified
+     * {@link Datastore}.
+     *
+     * @param xpathFilter optional XPath filter that narrows the returned data;
+     *                    may be {@code null} for an unfiltered request
+     * @param datastore   the target datastore (e.g., {@code operational}, {@code running});
+     *                    must not be {@code null}
+     * @return an {@link XML} object containing the server’s reply
+     * @throws IllegalArgumentException if {@code datastore} is {@code null}
+     * @throws IOException              if communication with the device fails
+     * @throws SAXException             if the reply XML is malformed
+     */
+    public XML getData(String xpathFilter, Datastore datastore)
             throws IOException, SAXException {
-
+        if (datastore == null) {
+            throw new IllegalArgumentException("Datastore argument must not be null");
+        }
         String rpc = "<rpc>" +
                 "<get-data>" +
                 "<datastore>ds:" + datastore + "</datastore>" +
@@ -355,7 +396,8 @@ public class NetconfSession {
     }
 
     /**
-     * Returns the &lt;hello&gt; message received from the server. See https://datatracker.ietf.org/doc/html/rfc6241#section-8.1
+     * Returns the &lt;hello&gt; message received from the server.
+     * See <a href="https://datatracker.ietf.org/doc/html/rfc6241#section-8.1">...</a>
      * @return the &lt;hello&gt; message received from the server.
      */
     public Hello getServerHello() {
@@ -363,30 +405,34 @@ public class NetconfSession {
     }
 
     /**
-     * Send an RPC(as String object) over the default Netconf session and get
-     * the response as an XML object.
+     * Sends a raw RPC string, waits for the {@code &lt;rpc-reply&gt;}, and converts the
+     * response to an {@link XML} object.
      * <p>
+     * If the server includes any {@code &lt;rpc-error&gt;} elements, the call
+     * now throws a {@link NetconfException}.  This makes error handling
+     * symmetrical with other high‑level helpers (e.g.&nbsp;{@code load*()},
+     * {@code commit()}).
      *
-     * @param rpcContent RPC content to be sent. For example, to send an rpc
-     *                   &lt;rpc&gt;&lt;get-chassis-inventory/&gt;&lt;/rpc&gt;, the
-     *                   String to be passed can be
-     *                      "&lt;get-chassis-inventory/&gt;" OR
-     *                      "get-chassis-inventory" OR
-     *                      "&lt;rpc&gt;&lt;get-chassis-inventory/&gt;&lt;/rpc&gt;"
-     * @return RPC reply sent by Netconf server
-     * @throws org.xml.sax.SAXException If the XML Reply cannot be parsed.
-     * @throws java.io.IOException      If there are issues communicating with the netconf server.
+     * @param rpcContent the RPC payload (with or without &lt;rpc&gt; wrapper)
+     * @return parsed {@link XML} representation of the reply
+     * @throws NetconfException        if the reply contains one or more
+     *                                 {@code &lt;rpc-error&gt;} elements
+     * @throws SAXException            if the reply cannot be parsed as XML
+     * @throws IOException             on transport errors
      */
     public XML executeRPC(String rpcContent) throws SAXException, IOException {
         String rpcReply = getRpcReply(fixupRpc(rpcContent));
         setLastRpcReply(rpcReply);
+
+        if (hasError()) {
+            throw new NetconfException("RPC returned error: " + rpcReply);
+        }
         return convertToXML(rpcReply);
     }
 
     /**
-     * Send an RPC(as XML object) over the Netconf session and get the response
+     * Send an RPC (as XML object) over the Netconf session and get the response
      * as an XML object.
-     * <p>
      *
      * @param rpc RPC to be sent. Use the XMLBuilder to create RPC as an
      *            XML object.
@@ -399,9 +445,8 @@ public class NetconfSession {
     }
 
     /**
-     * Send an RPC(as Document object) over the Netconf session and get the
+     * Send an RPC (as Document object) over the Netconf session and get the
      * response as an XML object.
-     * <p>
      *
      * @param rpcDoc RPC content to be sent, as a org.w3c.dom.Document object.
      * @return RPC reply sent by Netconf server
@@ -417,14 +462,14 @@ public class NetconfSession {
 
     /**
      * Given an RPC command, wrap it in RPC tags.
-     * https://tools.ietf.org/html/rfc6241#section-4.1
+     * <a href="https://tools.ietf.org/html/rfc6241#section-4.1">...</a>
      *
      * @param rpcContent an RPC command that may or may not be wrapped in  &lt; or &gt;
      * @return a string of the RPC command wrapped in &lt;rpc&gt;&lt; &gt;&lt;/rpc&gt;
      * @throws IllegalArgumentException if null is passed in as the rpcContent.
      */
     @VisibleForTesting
-    static String fixupRpc(@NonNull String rpcContent) throws IllegalArgumentException {
+    static String fixupRpc(String rpcContent) throws IllegalArgumentException {
         if (rpcContent == null) {
             throw new IllegalArgumentException("Null RPC");
         }
@@ -440,9 +485,8 @@ public class NetconfSession {
 
 
     /**
-     * Send an RPC(as String object) over the default Netconf session and get
+     * Send an RPC (as String object) over the default Netconf session and get
      * the response as a BufferedReader.
-     * <p>
      *
      * @param rpcContent RPC content to be sent. For example, to send an rpc
      *                   &lt;rpc&gt;&lt;get-chassis-inventory/&gt;&lt;/rpc&gt;, the
@@ -460,9 +504,8 @@ public class NetconfSession {
     }
 
     /**
-     * Send an RPC(as XML object) over the Netconf session and get the response
+     * Send an RPC (as XML object) over the Netconf session and get the response
      * as a BufferedReader.
-     * <p>
      *
      * @param rpc RPC to be sent. Use the XMLBuilder to create RPC as an
      *            XML object.
@@ -476,9 +519,8 @@ public class NetconfSession {
     }
 
     /**
-     * Send an RPC(as Document object) over the Netconf session and get the
+     * Send an RPC (as Document object) over the Netconf session and get the
      * response as a BufferedReader.
-     * <p>
      *
      * @param rpcDoc RPC content to be sent, as a org.w3c.dom.Document object.
      * @return RPC reply sent by Netconf server as a BufferedReader. This is
@@ -520,10 +562,8 @@ public class NetconfSession {
      * Check if the last RPC reply returned from Netconf server has any error.
      *
      * @return true if any errors are found in last RPC reply.
-     * @throws org.xml.sax.SAXException If the XML Reply cannot be parsed.
-     * @throws java.io.IOException      If there are issues communicating with the netconf server.
      */
-    public boolean hasError() throws SAXException, IOException {
+    public boolean hasError() {
         return lastRpcReplyObject.hasErrors();
     }
 
@@ -531,10 +571,8 @@ public class NetconfSession {
      * Check if the last RPC reply returned from Netconf server has any warning.
      *
      * @return true if any errors are found in last RPC reply.
-     * @throws org.xml.sax.SAXException If the XML Reply cannot be parsed.
-     * @throws java.io.IOException      If there are issues communicating with the netconf server.
      */
-    public boolean hasWarning() throws SAXException, IOException {
+    public boolean hasWarning() {
         return lastRpcReplyObject.hasWarnings();
     }
 
@@ -545,7 +583,7 @@ public class NetconfSession {
      * @return true if &lt;ok/&gt; tag is found in last RPC reply.
      */
     public boolean isOK() {
-        return lastRpcReplyObject.isOk();
+        return lastRpcReplyObject.isOK();
     }
 
     /**
@@ -572,10 +610,9 @@ public class NetconfSession {
      * Unlocks the candidate configuration.
      *
      * @return true if successful.
-     * @throws org.xml.sax.SAXException If the XML Reply cannot be parsed.
      * @throws java.io.IOException      If there are issues communicating with the netconf server.
      */
-    public boolean unlockConfig() throws IOException, SAXException {
+    public boolean unlockConfig() throws IOException {
         String rpc = "<rpc>" +
                 "<unlock>" +
                 "<target>" +
@@ -589,6 +626,35 @@ public class NetconfSession {
     }
 
     /**
+     * Terminates another active NETCONF session on the server
+     * (<a href="https://datatracker.ietf.org/doc/html/rfc6241#section-7.9">RFC&nbsp;6241&nbsp;§7.9</a>).
+     * <p>
+     * The server will abort any operations in progress for that session,
+     * release resources and locks, and close the connection.
+     *
+     * @param sessionId the session identifier to terminate; must not be {@code null} or empty
+     * @return {@code true} if the operation succeeded (no &lt;rpc-error&gt; and an &lt;ok/&gt; was returned)
+     * @throws IllegalArgumentException if {@code sessionId} is {@code null} or empty
+     * @throws IOException              if communication with the device fails
+     * @throws SAXException             if the reply cannot be parsed
+     */
+    public boolean killSession(String sessionId) throws IOException, SAXException {
+        if (sessionId == null || sessionId.isEmpty()) {
+            throw new IllegalArgumentException("sessionId must not be null or empty");
+        }
+
+        String rpc = "<rpc>" +
+                "<kill-session>" +
+                "<session-id>" + sessionId + "</session-id>" +
+                "</kill-session>" +
+                "</rpc>" +
+                NetconfConstants.DEVICE_PROMPT;
+
+        setLastRpcReply(getRpcReply(rpc));
+        return !hasError() && isOK();
+    }
+
+    /**
      * Loads the candidate configuration, Configuration should be in set
      * format.
      * NOTE: This method is applicable only for JUNOS release 11.4 and above.
@@ -597,10 +663,9 @@ public class NetconfSession {
      *                      "set system services ftp"
      *                      will load 'ftp' under the 'systems services' hierarchy.
      *                      To load multiple set statements, separate them by '\n' character.
-     * @throws org.xml.sax.SAXException If there are issues parsing the config file.
      * @throws java.io.IOException      If there are issues reading the config file.
      */
-    public void loadSetConfiguration(String configuration) throws IOException, SAXException {
+    public void loadSetConfiguration(String configuration) throws IOException {
         String rpc = "<rpc>" +
                 "<load-configuration action=\"set\">" +
                 "<configuration-set>" +
@@ -650,7 +715,7 @@ public class NetconfSession {
      */
     private String readConfigFile(String configFile) throws IOException {
         try {
-            return new String(Files.readAllBytes(Paths.get(configFile)), Charset.defaultCharset().name());
+            return Files.readString(Paths.get(configFile), Charset.defaultCharset());
         } catch (FileNotFoundException e) {
             throw new FileNotFoundException("The system cannot find the configuration file specified: " + configFile);
         }
@@ -679,11 +744,10 @@ public class NetconfSession {
      *
      * @param configFile Path name of file containing configuration,in set format,
      *                   to be loaded.
-     * @throws org.xml.sax.SAXException If there are issues parsing the config file.
      * @throws java.io.IOException      If there are issues reading the config file.
      */
     public void loadSetFile(String configFile) throws
-            IOException, SAXException {
+            IOException {
         loadSetConfiguration(readConfigFile(configFile));
     }
 
@@ -748,26 +812,79 @@ public class NetconfSession {
     }
 
     /**
-     * Commit the candidate configuration, temporarily. This is equivalent of
-     * 'commit confirm'
+     * Sends a *confirmed* &lt;commit&gt; request that follows the original
+     * RFC&nbsp;6241 §8.4 semantics (confirmed‑commit&nbsp;**1.0**).
+     * <p>
+     * The server will roll back the candidate configuration unless a
+     * non‑confirmed &lt;commit&gt; is issued from **the same session**
+     * within the given timeout period.
+     * </p>
      *
-     * @param seconds Time in seconds, after which the previous active configuration
-     *                is reverted back to.
-     * @throws java.io.IOException      If there are errors communicating with the netconf server.
-     * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
+     * @param seconds the &lt;confirm-timeout&gt; in seconds; if {@code seconds
+     *                &lt;= 0} the device’s default (600 s) is used
+     * @throws IOException if communication with the device fails
+     *
+     * @deprecated Prefer {@link #commitConfirm(long, String)} which adds
+     * the <code>&lt;persist&gt;</code> / <code>&lt;persist-id&gt;</code>
+     * parameters required by the
+     * <em>:confirmed-commit:1.1</em> capability.
      */
-    public void commitConfirm(long seconds) throws IOException, SAXException {
-        String rpc = "<rpc>" +
-                "<commit>" +
-                "<confirmed/>" +
-                "<confirm-timeout>" + seconds + "</confirm-timeout>" +
-                "</commit>" +
-                "</rpc>" +
-                NetconfConstants.DEVICE_PROMPT;
-        setLastRpcReply(getRpcReply(rpc));
-        if (hasError() || !isOK())
-            throw new CommitException("Commit operation returned " +
-                    "error.");
+    @Deprecated
+    public void commitConfirm(long seconds) throws IOException {
+        commitConfirm(seconds, null);
+    }
+
+    /**
+     * Issues a <em>confirmed</em> commit as defined by the
+     * <a href="https://datatracker.ietf.org/doc/html/rfc6241#section-8.4">
+     * :confirmed-commit:1.1 capability</a>.
+     *
+     * @param seconds        confirm‑timeout (600 s default).  If {@code seconds &lt;= 0}
+     *                       the timeout element is omitted and the server default
+     *                       is used.
+     * @param persistToken   optional token for cross‑session confirmation; if
+     *                       {@code null} the commit can only be confirmed from
+     *                       the same session.
+     * @throws IOException   if communication with the device fails
+     */
+    public void commitConfirm(long seconds, String persistToken) throws IOException {
+        StringBuilder rpc = new StringBuilder();
+        rpc.append("<rpc><commit><confirmed/>");
+        if (seconds > 0) {
+            rpc.append("<confirm-timeout>").append(seconds).append("</confirm-timeout>");
+        }
+        if (persistToken != null) {
+            rpc.append("<persist>").append(persistToken).append("</persist>");
+        }
+        rpc.append("</commit></rpc>").append(NetconfConstants.DEVICE_PROMPT);
+
+        setLastRpcReply(getRpcReply(rpc.toString()));
+        if (hasError() || !isOK()) {
+            throw new CommitException("Confirmed-commit operation returned error.");
+        }
+    }
+
+    /**
+     * Cancels a pending confirmed commit.
+     *
+     * @param persistId optional token that matches the &lt;persist&gt; used
+     *                  in the original confirmed commit; may be {@code null}
+     *                  if no token was supplied.
+     * @return {@code true} if the server replied &lt;ok/&gt;
+     * @throws IOException  if communication with the device fails
+     * @throws SAXException if the reply cannot be parsed
+     */
+    public boolean cancelCommit(String persistId) throws IOException, SAXException {
+        StringBuilder rpc = new StringBuilder();
+        rpc.append("<rpc><cancel-commit/>");
+        if (persistId != null) {
+            rpc.insert(rpc.length() - "</cancel-commit/>".length(),
+                       "<persist-id>" + persistId + "</persist-id>");
+        }
+        rpc.append("</rpc>").append(NetconfConstants.DEVICE_PROMPT);
+
+        setLastRpcReply(getRpcReply(rpc.toString()));
+        return !hasError() && isOK();
     }
 
     /**
@@ -775,9 +892,8 @@ public class NetconfSession {
      *
      * @throws net.juniper.netconf.CommitException if there is an error committing the config.
      * @throws java.io.IOException                 If there are errors communicating with the netconf server.
-     * @throws org.xml.sax.SAXException            If there are errors parsing the XML reply.
      */
-    public void commitFull() throws CommitException, IOException, SAXException {
+    public void commitFull() throws CommitException, IOException {
         String rpc = "<rpc>" +
                 "<commit-configuration>" +
                 "<full/>" +
@@ -847,9 +963,8 @@ public class NetconfSession {
      *
      * @return true if validation successful.
      * @throws java.io.IOException      If there are errors communicating with the netconf server.
-     * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
      */
-    public boolean validate() throws IOException, SAXException {
+    public boolean validate() throws IOException {
 
         String rpc = "<rpc>" +
                 "<validate>" +
