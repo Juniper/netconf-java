@@ -12,19 +12,14 @@ import com.jcraft.jsch.ChannelSubsystem;
 import com.jcraft.jsch.JSch;
 import com.jcraft.jsch.JSchException;
 import com.jcraft.jsch.Session;
-import lombok.Builder;
-import lombok.Getter;
-import lombok.NonNull;
-import lombok.ToString;
-import lombok.extern.slf4j.Slf4j;
 import net.juniper.netconf.element.Datastore;
 import net.juniper.netconf.element.Hello;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.w3c.dom.Document;
 import org.xml.sax.SAXException;
 
 import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
-import javax.xml.parsers.ParserConfigurationException;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
@@ -32,6 +27,7 @@ import java.io.InputStreamReader;
 import java.nio.charset.Charset;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * A <code>Device</code> is used to define a Netconf server.
@@ -56,10 +52,9 @@ import java.util.List;
  * {@link #close() close()} method.</li>
  * </ol>
  */
-@Slf4j
-@Getter
-@ToString
 public class Device implements AutoCloseable {
+
+    private static final Logger log = LoggerFactory.getLogger(Device.class);
 
     private static final int DEFAULT_NETCONF_PORT = 830;
     private static final int DEFAULT_TIMEOUT = 5000;
@@ -86,7 +81,7 @@ public class Device implements AutoCloseable {
     private final boolean strictHostKeyChecking;
     private final String hostKeysFileName;
 
-    private final DocumentBuilder builder;
+    private final DocumentBuilder xmlBuilder;
     private final List<String> netconfCapabilities;
     private final String helloRpc;
 
@@ -94,75 +89,301 @@ public class Device implements AutoCloseable {
     private Session sshSession;
     private NetconfSession netconfSession;
 
-    @Builder
-    public Device(JSch sshClient,
-                  @NonNull String hostName,
-                  Integer port,
-                  Integer timeout,
-                  Integer connectionTimeout,
-                  Integer commandTimeout,
-                  @NonNull String userName,
-                  String password,
-                  Boolean keyBasedAuthentication,
-                  String pemKeyFile,
-                  Boolean strictHostKeyChecking,
-                  String hostKeysFileName,
-                  List<String> netconfCapabilities
-    ) throws NetconfException {
-        this.hostName = hostName;
-        this.port = (port != null) ? port : DEFAULT_NETCONF_PORT;
-        Integer commonTimeout = (timeout != null) ? timeout : DEFAULT_TIMEOUT;
-        this.connectionTimeout = (connectionTimeout != null) ? connectionTimeout : commonTimeout;
-        this.commandTimeout = (commandTimeout != null) ? commandTimeout : commonTimeout;
-
-        this.userName = userName;
-        this.password = password;
-
-        if (this.password == null && pemKeyFile == null) {
-            throw new NetconfException("Auth requires either setting the password or the pemKeyFile");
-        }
-
-        this.keyBasedAuthentication = (keyBasedAuthentication != null) ? keyBasedAuthentication : false;
-        this.pemKeyFile = pemKeyFile;
-
-        if (this.keyBasedAuthentication && pemKeyFile == null) {
-            throw new NetconfException("key based authentication requires setting the pemKeyFile");
-        }
-
-        this.strictHostKeyChecking = (strictHostKeyChecking != null) ? strictHostKeyChecking : true;
-        this.hostKeysFileName = hostKeysFileName;
-
-        if (this.strictHostKeyChecking && hostKeysFileName == null) {
-            throw new NetconfException("Strict Host Key checking requires setting the hostKeysFileName");
-        }
-
-        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-        try {
-            builder = factory.newDocumentBuilder();
-        } catch (ParserConfigurationException e) {
-            throw new NetconfException(String.format("Error creating XML Parser: %s", e.getMessage()), e);
-        }
-
-        this.netconfCapabilities = (netconfCapabilities != null) ? netconfCapabilities : getDefaultClientCapabilities();
-        helloRpc = createHelloRPC(this.netconfCapabilities);
-
-        this.sshClient = (sshClient != null) ? sshClient : new JSch();
+    /**
+     * Returns a new {@link Builder} for constructing {@link Device} instances.
+     *
+     * @return fresh {@link Builder}
+     */
+    public static Builder builder() {
+        return new Builder();
     }
+
+    /**
+     * Fluent builder for {@link Device}.  Configure desired fields and call
+     * {@link #build()} to obtain an immutable instance.
+     */
+    public static final class Builder {
+        /**
+         * Creates an empty {@code Builder}.
+         */
+        private Builder() {
+        }
+
+        private JSch sshClient = new JSch();
+        private String hostName;
+        private int port = DEFAULT_NETCONF_PORT;
+        private int timeout = DEFAULT_TIMEOUT;
+        private Integer connectionTimeout;
+        private Integer commandTimeout;
+        private String userName;
+        private String password;
+        private boolean keyAuth = false;
+        private String pemKeyFile;
+        private boolean strictHostKeyChecking = true;
+        private String hostKeysFileName;
+        private List<String> netconfCapabilities = DEFAULT_CLIENT_CAPABILITIES;
+
+
+        /**
+         * Replaces the default {@link JSch} instance with a caller‑supplied one.
+         * <p>
+         * Supplying your own {@code JSch} lets you pre‑configure global settings
+         * like proxies or identity repositories before a {@link Device} is built.
+         *
+         * @param sshClient pre‑configured {@link JSch} instance (must not be {@code null})
+         * @return this {@code Builder} for fluent chaining
+         * @throws NullPointerException if {@code sshClient} is {@code null}
+         */
+        public Builder sshClient(JSch sshClient) {
+            this.sshClient = Objects.requireNonNull(sshClient);
+            return this;
+        }
+
+        /**
+         * Sets the DNS host name or IP address of the Netconf server.
+         *
+         * @param hostName server host name or IP
+         * @return this {@code Builder} for fluent chaining
+         */
+        public Builder hostName(String hostName) {
+            this.hostName = hostName;
+            return this;
+        }
+
+        /**
+         * Specifies the TCP port on which the Netconf SSH subsystem listens.
+         * <p>
+         * Defaults to {@code 830} if not set.
+         *
+         * @param port TCP port number
+         * @return this {@code Builder} for fluent chaining
+         */
+        public Builder port(int port) {
+            this.port = port;
+            return this;
+        }
+
+        /**
+         * Sets a default timeout (in milliseconds) that is used when a more
+         * specific {@link #connectionTimeout(int)} or {@link #commandTimeout(int)}
+         * value has not been provided.
+         *
+         * @param ms timeout in milliseconds
+         * @return this {@code Builder} for fluent chaining
+         */
+        public Builder timeout(int ms) {
+            this.timeout = ms;
+            return this;
+        }
+
+        /**
+         * Overrides the default SSH connection timeout.
+         *
+         * @param ms timeout in milliseconds for establishing the SSH session
+         * @return this {@code Builder} for fluent chaining
+         */
+        public Builder connectionTimeout(int ms) {
+            this.connectionTimeout = ms;
+            return this;
+        }
+
+        /**
+         * Sets the per‑command timeout that applies to individual NETCONF RPCs
+         * (distinct from the SSH connection timeout).
+         *
+         * @param ms timeout in milliseconds
+         * @return this {@code Builder} for fluent chaining
+         */
+        public Builder commandTimeout(int ms) {
+            this.commandTimeout = ms;
+            return this;
+        }
+
+        /**
+         * Specifies the login user name for the SSH/NETCONF session.
+         *
+         * @param userName user name string
+         * @return this {@code Builder} for fluent chaining
+         */
+        public Builder userName(String userName) {
+            this.userName = userName;
+            return this;
+        }
+
+        /**
+         * Sets the password used for password‑based SSH authentication.
+         * <p>
+         * Ignored if {@link #keyBasedAuth(String)} is used instead.
+         *
+         * @param password login password
+         * @return this {@code Builder} for fluent chaining
+         */
+        public Builder password(String password) {
+            this.password = password;
+            return this;
+        }
+
+        /**
+         * Enables key‑based SSH authentication and sets the path to the PEM
+         * private‑key file.
+         *
+         * @param pem absolute or relative path to the PEM‑formatted private key
+         * @return this {@code Builder} for fluent chaining
+         */
+        public Builder keyBasedAuth(String pem) {
+            this.keyAuth = true;
+            this.pemKeyFile = pem;
+            return this;
+        }
+
+        /**
+         * Specifies the path to the PEM‑formatted private key that will be used
+         * for key‑based SSH authentication.
+         * <p>
+         * Note: calling this method alone does <em>not</em> switch the builder
+         * to key‑authentication mode; be sure to also invoke
+         * {@link #keyBasedAuth(String)} or set {@link #keyAuth} explicitly.
+         *
+         * @param pemKeyFile absolute or relative path to the PEM key file
+         * @return this {@code Builder} for fluent chaining
+         */
+        public Builder pemKeyFile(String pemKeyFile) {
+            this.pemKeyFile = pemKeyFile;
+            return this;
+        }
+
+        /**
+         * Disables strict host‑key checking so every host key is trusted
+         * (equivalent to {@code StrictHostKeyChecking=no} in OpenSSH).
+         * <p>
+         * <strong>Security note:</strong> Accepting all host keys makes the
+         * connection vulnerable to man‑in‑the‑middle attacks.  Use this only in
+         * development or other low‑risk environments.
+         *
+         * @return this {@code Builder} for fluent chaining
+         */
+        public Builder trustAllHostKeys() {
+            this.strictHostKeyChecking = false;
+            return this;
+        }
+
+        /**
+         * Enables or disables strict host‑key checking for the SSH session.
+         * <p>
+         * When set to {@code true} the underlying JSch session will verify the
+         * server's host key against the known‑hosts file and refuse the
+         * connection if it is unknown.  When {@code false} the connection will
+         * proceed even if the server's host key is not listed.
+         *
+         * @param strictHostKeyChecking whether to enforce host‑key checking
+         * @return this {@code Builder} for fluent chaining
+         */
+        public Builder strictHostKeyChecking(boolean strictHostKeyChecking) {
+            this.strictHostKeyChecking = strictHostKeyChecking;
+            return this;
+        }
+
+        /**
+         * Specifies the path to the SSH known‑hosts file used when
+         * {@link #strictHostKeyChecking(boolean)} is enabled.
+         *
+         * @param hostKeysFileName absolute or relative path to the known‑hosts file
+         * @return this {@code Builder} for fluent chaining
+         */
+        public Builder hostKeysFileName(String hostKeysFileName) {
+            this.hostKeysFileName = hostKeysFileName;
+            return this;
+        }
+
+        /**
+         * Replaces the default list of client‑side Netconf capabilities that
+         * will be advertised in the initial {@code &lt;hello&gt;} message.
+         * <p>
+         * The supplied list is defensively copied and wrapped in an
+         * unmodifiable view, so subsequent modifications to the original list
+         * do not affect the builder.
+         *
+         * @param caps list of capability URIs; must not be {@code null}
+         * @return this {@code Builder} for fluent chaining
+         * @throws NullPointerException if {@code caps} is {@code null}
+         */
+        public Builder netconfCapabilities(List<String> caps) {
+            this.netconfCapabilities = java.util.Collections.unmodifiableList(new java.util.ArrayList<>(caps));
+            return this;
+        }
+
+        /**
+         * Validates all required fields and constructs an immutable {@link Device}.
+         * <p>
+         * Mandatory parameters include host name, user credentials (or key), and
+         * host‑key settings when strict checking is enabled.  If any of these are
+         * missing or inconsistent, a {@link NetconfException} is thrown.
+         *
+         * @return a fully‑configured {@link Device} instance
+         * @throws NetconfException if validation fails or if an internal error
+         *                          occurs while initialising auxiliary resources
+         */
+        public Device build() throws NetconfException {
+            // Validation logic moved from Device constructor
+            if (hostName == null) throw new NetconfException("hostName is required");
+            if (userName == null) throw new NetconfException("userName is required");
+            if (!keyAuth && password == null)
+                throw new NetconfException("Password is required for password auth");
+            if (strictHostKeyChecking && hostKeysFileName == null)
+                throw new NetconfException("hostKeysFileName required when strictHostKeyChecking=true");
+            if (keyAuth && pemKeyFile == null)
+                throw new NetconfException("pemKeyFile required when keyAuth=true");
+            try {
+                return new Device(this);
+            } catch (NetconfException e) {
+                throw e;
+            }
+        }
+    }
+
+    /* ------------------------------------------------------------------
+     * Private constructor used by Builder
+     * ------------------------------------------------------------------ */
+    private Device(Builder b) throws NetconfException {
+        this.sshClient = b.sshClient;
+        this.hostName = b.hostName;
+        this.port = b.port;
+        this.connectionTimeout = b.connectionTimeout != null ? b.connectionTimeout : b.timeout;
+        this.commandTimeout = b.commandTimeout != null ? b.commandTimeout : b.timeout;
+
+        this.userName = b.userName;
+        this.password = b.password;
+        this.keyBasedAuthentication = b.keyAuth;
+        this.pemKeyFile = b.pemKeyFile;
+        this.strictHostKeyChecking = b.strictHostKeyChecking;
+        this.hostKeysFileName = b.hostKeysFileName;
+
+        this.netconfCapabilities = b.netconfCapabilities;
+
+        try {
+            this.xmlBuilder = javax.xml.parsers.DocumentBuilderFactory.newInstance().newDocumentBuilder();
+        } catch (javax.xml.parsers.ParserConfigurationException e) {
+            throw new NetconfException("Cannot create XML Parser", e);
+        }
+
+        this.helloRpc = createHelloRPC(this.netconfCapabilities);
+    }
+
 
     /**
      * Get the client capabilities that are advertised to the Netconf server by default.
      * RFC 6241 describes the standard netconf capabilities.
-     * https://tools.ietf.org/html/rfc6241#section-8
+     * <a href="https://tools.ietf.org/html/rfc6241#section-8">...</a>
      *
      * @return List of default client capabilities.
      */
-    private List<String> getDefaultClientCapabilities() {
+    protected List<String> getDefaultClientCapabilities() {
         return DEFAULT_CLIENT_CAPABILITIES;
     }
 
     /**
      * Given a list of netconf capabilities, generate the netconf hello rpc message.
-     * https://tools.ietf.org/html/rfc6241#section-8.1
+     * <a href="https://tools.ietf.org/html/rfc6241#section-8.1">...</a>
      *
      * @param capabilities A list of netconf capabilities
      * @return the hello RPC that represents those capabilities.
@@ -215,10 +436,10 @@ public class Device implements AutoCloseable {
         try {
             sshChannel = (ChannelSubsystem) sshSession.openChannel("subsystem");
             sshChannel.setSubsystem("netconf");
-            return new NetconfSession(sshChannel, connectionTimeout, commandTimeout, helloRpc, builder);
+            return new NetconfSession(sshChannel, connectionTimeout, commandTimeout, helloRpc, xmlBuilder);
         } catch (JSchException | IOException e) {
             throw new NetconfException("Failed to create Netconf session:" +
-                    e.getMessage(), e);
+                e.getMessage(), e);
         }
     }
 
@@ -232,7 +453,7 @@ public class Device implements AutoCloseable {
             return session;
         } catch (JSchException e) {
             throw new NetconfException(String.format("Error connecting to host: %s - Error: %s",
-                    hostName, e.getMessage()), e);
+                hostName, e.getMessage()), e);
         }
     }
 
@@ -245,7 +466,7 @@ public class Device implements AutoCloseable {
             return session;
         } catch (JSchException e) {
             throw new NetconfException(String.format("Error using key pair file: %s to connect to host: %s - Error: %s",
-                    pemKeyFile, hostName, e.getMessage()), e);
+                pemKeyFile, hostName, e.getMessage()), e);
         }
     }
 
@@ -256,9 +477,9 @@ public class Device implements AutoCloseable {
      */
     public void connect() throws NetconfException {
         if (hostName == null || userName == null || (password == null &&
-                pemKeyFile == null)) {
+            pemKeyFile == null)) {
             throw new NetconfException("Login parameters of Device can't be " +
-                    "null.");
+                "null.");
         }
         netconfSession = this.createNetconfSession();
     }
@@ -280,11 +501,17 @@ public class Device implements AutoCloseable {
     public String reboot() throws IOException {
         if (netconfSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
-                    "establish a connection first.");
+                "establish a connection first.");
         }
         return this.netconfSession.reboot();
     }
 
+    /**
+     * Indicates whether both the SSH {@link Session} and {@link ChannelSubsystem}
+     * are currently connected.
+     *
+     * @return {@code true} if the device is connected
+     */
     public boolean isConnected() {
         return (isChannelConnected() && isSessionConnected());
     }
@@ -370,7 +597,7 @@ public class Device implements AutoCloseable {
      * @throws IOException if there are issues communicating with the Netconf server.
      */
     public BufferedReader runShellCommandRunning(String command)
-            throws IOException {
+        throws IOException {
         if (!isConnected()) {
             throw new IOException("Could not find open connection");
         }
@@ -385,9 +612,9 @@ public class Device implements AutoCloseable {
     }
 
     /**
-     * Send an RPC(as String object) over the default Netconf session and get
-     * the response as an XML object.
-     * <p>
+     * Send an RPC(as String object) over the default Netconf session and get the
+     * response as an XML object.
+     * <p>Convenience overload for raw‑string payloads.</p>
      *
      * @param rpcContent RPC content to be sent. For example, to send an rpc
      *                   &lt;rpc&gt;&lt;get-chassis-inventory/&gt;&lt;/rpc&gt;, the
@@ -402,7 +629,7 @@ public class Device implements AutoCloseable {
     public XML executeRPC(String rpcContent) throws SAXException, IOException {
         if (netconfSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
-                    "establish a connection first.");
+                "establish a connection first.");
         }
         return netconfSession.executeRPC(rpcContent);
     }
@@ -410,7 +637,7 @@ public class Device implements AutoCloseable {
     /**
      * Send an RPC(as XML object) over the Netconf session and get the response
      * as an XML object.
-     * <p>
+     * <p>Use when the payload is already assembled as an {@link XML} helper object.</p>
      *
      * @param rpc RPC to be sent. Use the XMLBuilder to create RPC as an
      *            XML object.
@@ -421,7 +648,7 @@ public class Device implements AutoCloseable {
     public XML executeRPC(XML rpc) throws SAXException, IOException {
         if (netconfSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
-                    "establish a connection first.");
+                "establish a connection first.");
         }
         return this.netconfSession.executeRPC(rpc);
     }
@@ -429,7 +656,8 @@ public class Device implements AutoCloseable {
     /**
      * Send an RPC(as Document object) over the Netconf session and get the
      * response as an XML object.
-     * <p>
+     * <p>Accepts a DOM {@link org.w3c.dom.Document} that represents the full
+     * &lt;rpc&gt; element.</p>
      *
      * @param rpcDoc RPC content to be sent, as a org.w3c.dom.Document object.
      * @return RPC reply sent by Netconf server
@@ -439,31 +667,24 @@ public class Device implements AutoCloseable {
     public XML executeRPC(Document rpcDoc) throws SAXException, IOException {
         if (netconfSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
-                    "establish a connection first.");
+                "establish a connection first.");
         }
         return this.netconfSession.executeRPC(rpcDoc);
     }
 
     /**
-     * Send an RPC(as String object) over the default Netconf session and get
-     * the response as a BufferedReader.
-     * <p>
+     * Sends an RPC (as a raw XML string) over the default Netconf session and
+     * returns a {@link BufferedReader} for streaming the reply.
      *
-     * @param rpcContent RPC content to be sent. For example, to send an rpc
-     *                   &lt;rpc&gt;&lt;get-chassis-inventory/&gt;&lt;/rpc&gt;, the
-     *                   String to be passed can be
-     *                   "&lt;get-chassis-inventory/&gt;" OR
-     *                   "get-chassis-inventory" OR
-     *                   "&lt;rpc&gt;&lt;get-chassis-inventory/&gt;&lt;/rpc&gt;"
-     * @return RPC reply sent by Netconf server as a BufferedReader. This is
-     * useful if we want continuous stream of output, rather than wait
-     * for whole output till rpc execution completes.
-     * @throws java.io.IOException if there are errors communicating with the Netconf server.
+     * @param rpcContent XML payload to send (content of the &lt;rpc&gt; element)
+     * @return RPC reply as a {@link BufferedReader}
+     * @throws IOException           if communication with the server fails
+     * @throws IllegalStateException if no Netconf connection exists
      */
     public BufferedReader executeRPCRunning(String rpcContent) throws IOException {
         if (netconfSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
-                    "establish a connection first.");
+                "establish a connection first.");
         }
         return this.netconfSession.executeRPCRunning(rpcContent);
     }
@@ -471,7 +692,7 @@ public class Device implements AutoCloseable {
     /**
      * Send an RPC(as XML object) over the Netconf session and get the response
      * as a BufferedReader.
-     * <p>
+     * <p>Streams the reply incrementally, suitable for large responses.</p>
      *
      * @param rpc RPC to be sent. Use the XMLBuilder to create RPC as an
      *            XML object.
@@ -483,26 +704,34 @@ public class Device implements AutoCloseable {
     public BufferedReader executeRPCRunning(XML rpc) throws IOException {
         if (netconfSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
-                    "establish a connection first.");
+                "establish a connection first.");
         }
         return this.netconfSession.executeRPCRunning(rpc);
     }
 
     /**
-     * Send an RPC(as Document object) over the Netconf session and get the
-     * response as a BufferedReader.
+     * Sends an RPC (as a DOM {@link Document}) over the active NETCONF session
+     * and returns a {@link BufferedReader} for streaming the reply.
      * <p>
+     * Use this variant when you need to consume the server response
+     * <em>incrementally</em>&nbsp;&mdash; for example, when the RPC produces a
+     * large dataset or when you want to start processing output before the
+     * device finishes sending the final <code>]]&gt;]]&gt;</code> prompt.
+     * </p>
      *
-     * @param rpcDoc RPC content to be sent, as a org.w3c.dom.Document object.
-     * @return RPC reply sent by Netconf server as a BufferedReader. This is
-     * useful if we want continuous stream of output, rather than wait
-     * for whole output till command execution completes.
-     * @throws java.io.IOException If there are errors communicating with the Netconf server.
+     * @param rpcDoc the complete &lt;rpc&gt; element encoded as a DOM
+     *               {@link Document}; must not be {@code null}
+     *
+     * @return a {@link BufferedReader} connected to the server’s reply stream
+     *
+     * @throws IOException           if an I/O error occurs while sending the
+     *                               request or reading the reply
+     * @throws IllegalStateException if no NETCONF connection is established
      */
     public BufferedReader executeRPCRunning(Document rpcDoc) throws IOException {
         if (netconfSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
-                    "establish a connection first.");
+                "establish a connection first.");
         }
         return this.netconfSession.executeRPCRunning(rpcDoc);
     }
@@ -516,7 +745,7 @@ public class Device implements AutoCloseable {
     public String getSessionId() {
         if (netconfSession == null) {
             throw new IllegalStateException("Cannot get session ID, you need " +
-                    "to establish a connection first.");
+                "to establish a connection first.");
         }
         return this.netconfSession.getSessionId();
     }
@@ -532,7 +761,7 @@ public class Device implements AutoCloseable {
     public boolean hasError() throws SAXException, IOException {
         if (netconfSession == null) {
             throw new IllegalStateException("No RPC executed yet, you need to" +
-                    " establish a connection first.");
+                " establish a connection first.");
         }
         return this.netconfSession.hasError();
     }
@@ -547,7 +776,7 @@ public class Device implements AutoCloseable {
     public boolean hasWarning() throws SAXException, IOException {
         if (netconfSession == null) {
             throw new IllegalStateException("No RPC executed yet, you need to " +
-                    "establish a connection first.");
+                "establish a connection first.");
         }
         return this.netconfSession.hasWarning();
     }
@@ -562,7 +791,7 @@ public class Device implements AutoCloseable {
     public boolean isOK() {
         if (netconfSession == null) {
             throw new IllegalStateException("No RPC executed yet, you need to " +
-                    "establish a connection first.");
+                "establish a connection first.");
         }
         return this.netconfSession.isOK();
     }
@@ -578,7 +807,7 @@ public class Device implements AutoCloseable {
     public boolean lockConfig() throws IOException, SAXException {
         if (netconfSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
-                    "establish a connection first.");
+                "establish a connection first.");
         }
         return this.netconfSession.lockConfig();
     }
@@ -593,7 +822,7 @@ public class Device implements AutoCloseable {
     public boolean unlockConfig() throws IOException, SAXException {
         if (netconfSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
-                    "establish a connection first.");
+                "establish a connection first.");
         }
         return this.netconfSession.unlockConfig();
     }
@@ -610,10 +839,10 @@ public class Device implements AutoCloseable {
      * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
      */
     public void loadXMLConfiguration(String configuration, String loadType)
-            throws IOException, SAXException {
+        throws IOException, SAXException {
         if (netconfSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
-                    "establish a connection first.");
+                "establish a connection first.");
         }
         this.netconfSession.loadXMLConfiguration(configuration, loadType);
     }
@@ -634,10 +863,10 @@ public class Device implements AutoCloseable {
      * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
      */
     public void loadTextConfiguration(String configuration, String loadType)
-            throws IOException, SAXException {
+        throws IOException, SAXException {
         if (netconfSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
-                    "establish a connection first.");
+                "establish a connection first.");
         }
         this.netconfSession.loadTextConfiguration(configuration, loadType);
     }
@@ -655,11 +884,11 @@ public class Device implements AutoCloseable {
      * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
      */
     public void loadSetConfiguration(String configuration) throws
-            IOException,
-            SAXException {
+        IOException,
+        SAXException {
         if (netconfSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
-                    "establish a connection first.");
+                "establish a connection first.");
         }
         this.netconfSession.loadSetConfiguration(configuration);
     }
@@ -675,10 +904,10 @@ public class Device implements AutoCloseable {
      * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
      */
     public void loadXMLFile(String configFile, String loadType)
-            throws IOException, SAXException {
+        throws IOException, SAXException {
         if (netconfSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
-                    "establish a connection first.");
+                "establish a connection first.");
         }
         this.netconfSession.loadXMLFile(configFile, loadType);
     }
@@ -694,10 +923,10 @@ public class Device implements AutoCloseable {
      * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
      */
     public void loadTextFile(String configFile, String loadType)
-            throws IOException, SAXException {
+        throws IOException, SAXException {
         if (netconfSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
-                    "establish a connection first.");
+                "establish a connection first.");
         }
         this.netconfSession.loadTextFile(configFile, loadType);
     }
@@ -713,10 +942,10 @@ public class Device implements AutoCloseable {
      * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
      */
     public void loadSetFile(String configFile) throws
-            IOException, SAXException {
+        IOException, SAXException {
         if (netconfSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
-                    "establish a connection first.");
+                "establish a connection first.");
         }
         this.netconfSession.loadSetFile(configFile);
     }
@@ -731,7 +960,7 @@ public class Device implements AutoCloseable {
     public void commit() throws CommitException, IOException, SAXException {
         if (netconfSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
-                    "establish a connection first.");
+                "establish a connection first.");
         }
         this.netconfSession.commit();
     }
@@ -747,10 +976,10 @@ public class Device implements AutoCloseable {
      * @throws org.xml.sax.SAXException            If there are errors parsing the XML reply.
      */
     public void commitConfirm(long seconds) throws CommitException, IOException,
-            SAXException {
+        SAXException {
         if (netconfSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
-                    "establish a connection first.");
+                "establish a connection first.");
         }
         this.netconfSession.commitConfirm(seconds);
     }
@@ -766,7 +995,7 @@ public class Device implements AutoCloseable {
     public void commitFull() throws CommitException, IOException, SAXException {
         if (netconfSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
-                    "establish a connection first.");
+                "establish a connection first.");
         }
         this.netconfSession.commitFull();
     }
@@ -778,10 +1007,10 @@ public class Device implements AutoCloseable {
      * @param configFile Path name of file containing configuration,in text/xml format,
      *                   to be loaded. For example,
      *                   "system {
-     *                      services {
-     *                          ftp;
-     *                      }
-     *                    }"
+     *                   services {
+     *                   ftp;
+     *                   }
+     *                   }"
      *                   will load 'ftp' under the 'systems services' hierarchy.
      *                   OR
      *                   "&lt;configuration&gt;&lt;system&gt;&lt;services&gt;&lt;ftp/&gt;&lt;
@@ -793,10 +1022,10 @@ public class Device implements AutoCloseable {
      * @throws org.xml.sax.SAXException            If there are errors parsing the XML reply.
      */
     public void commitThisConfiguration(String configFile, String loadType)
-            throws CommitException, IOException, SAXException {
+        throws CommitException, IOException, SAXException {
         if (netconfSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
-                    "establish a connection first.");
+                "establish a connection first.");
         }
         this.netconfSession.commitThisConfiguration(configFile, loadType);
     }
@@ -812,10 +1041,10 @@ public class Device implements AutoCloseable {
      * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
      */
     public XML getCandidateConfig(String configTree) throws SAXException,
-            IOException {
+        IOException {
         if (netconfSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
-                    "establish a connection first.");
+                "establish a connection first.");
         }
         return this.netconfSession.getCandidateConfig(configTree);
     }
@@ -831,10 +1060,10 @@ public class Device implements AutoCloseable {
      * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
      */
     public XML getRunningConfig(String configTree) throws SAXException,
-            IOException {
+        IOException {
         if (netconfSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
-                    "establish a connection first.");
+                "establish a connection first.");
         }
         return this.netconfSession.getRunningConfig(configTree);
     }
@@ -842,7 +1071,7 @@ public class Device implements AutoCloseable {
     /**
      * Retrieve the running configuration, or part of the configuration.
      *
-     * @param xpathFilter example <code><filter xmlns:model='urn:path:for:my:model' select='/model:*'></filter></code>
+     * @param xpathFilter example {@code &lt;filter xmlns:model='urn:path:for:my:model' select='/model:*' /&gt;}
      * @return configuration data as XML object.
      * @throws java.io.IOException      If there are errors communicating with the netconf server.
      * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
@@ -850,27 +1079,28 @@ public class Device implements AutoCloseable {
     public XML getRunningConfigAndState(String xpathFilter) throws IOException, SAXException {
         if (netconfSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
-                    "establish a connection first.");
+                "establish a connection first.");
         }
         return this.netconfSession.getRunningConfigAndState(xpathFilter);
     }
 
 
     /**
-     * Run the <get-data> call to netconf server and retrieve data as an XML.
+     * Run the {@code &lt;get-data&gt;} call to netconf server and retrieve data as an XML.
      *
-     * @param xpathFilter example <code><filter xmlns:model='urn:path:for:my:model' select='/model:*'></filter></code>
-     * @param datastore running, startup, candidate, or operational
+     * @param xpathFilter example {@code &lt;filter xmlns:model='urn:path:for:my:model' select='/model:*' /&gt;}
+     * @param datastore   running, startup, candidate, or operational
      * @return configuration data as XML object.
      * @throws java.io.IOException      If there are errors communicating with the netconf server.
      * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
      */
-    public XML getData(String xpathFilter, @NonNull Datastore datastore) throws IOException, SAXException {
+    public XML getData(String xpathFilter, Datastore datastore) throws IOException, SAXException {
+        if (datastore == null) throw new NullPointerException("datastore must not be null");
         if (netconfSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
-                    "establish a connection first.");
+                "establish a connection first.");
         }
-       return this.netconfSession.getData(xpathFilter, datastore);
+        return this.netconfSession.getData(xpathFilter, datastore);
     }
 
 
@@ -884,7 +1114,7 @@ public class Device implements AutoCloseable {
     public XML getCandidateConfig() throws SAXException, IOException {
         if (netconfSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
-                    "establish a connection first.");
+                "establish a connection first.");
         }
         return this.netconfSession.getCandidateConfig();
     }
@@ -899,7 +1129,7 @@ public class Device implements AutoCloseable {
     public XML getRunningConfig() throws SAXException, IOException {
         if (netconfSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
-                    "establish a connection first.");
+                "establish a connection first.");
         }
         return this.netconfSession.getRunningConfig();
     }
@@ -914,7 +1144,7 @@ public class Device implements AutoCloseable {
     public boolean validate() throws IOException, SAXException {
         if (netconfSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
-                    "establish a connection first.");
+                "establish a connection first.");
         }
         return this.netconfSession.validate();
     }
@@ -931,7 +1161,7 @@ public class Device implements AutoCloseable {
     public String runCliCommand(String command) throws IOException, SAXException {
         if (netconfSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
-                    "establish a connection first.");
+                "establish a connection first.");
         }
         return this.netconfSession.runCliCommand(command);
     }
@@ -948,7 +1178,7 @@ public class Device implements AutoCloseable {
     public BufferedReader runCliCommandRunning(String command) throws IOException {
         if (netconfSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
-                    "establish a connection first.");
+                "establish a connection first.");
         }
         return this.netconfSession.runCliCommandRunning(command);
     }
@@ -964,7 +1194,7 @@ public class Device implements AutoCloseable {
     public void openConfiguration(String mode) throws IOException {
         if (netconfSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
-                    "establish a connection first.");
+                "establish a connection first.");
         }
         netconfSession.openConfiguration(mode);
     }
@@ -978,7 +1208,7 @@ public class Device implements AutoCloseable {
     public void closeConfiguration() throws IOException {
         if (netconfSession == null) {
             throw new IllegalStateException("Cannot execute RPC, you need to " +
-                    "establish a connection first.");
+                "establish a connection first.");
         }
         netconfSession.closeConfiguration();
     }
@@ -1008,6 +1238,7 @@ public class Device implements AutoCloseable {
     /**
      * Removes an RPC attribute from the default rpc xml envelope used in all rpc executions.
      *
+     * @param name the attribute name to remove
      * @return The value of the removed attribute.
      * @throws NullPointerException If the device connection has not been made yet.
      */
@@ -1024,4 +1255,289 @@ public class Device implements AutoCloseable {
             netconfSession.removeAllRPCAttributes();
     }
 
+    /**
+     * Convenience alias for {@link #getStrictHostKeyChecking()}.
+     *
+     * @return {@code true} if strict host-key checking is enabled
+     */
+    public boolean isStrictHostKeyChecking() {
+        return this.strictHostKeyChecking;
+    }
+    // Getters for fields
+
+    /**
+     * Returns the {@link JSch} instance that backs this {@code Device}.
+     * <p>
+     * <strong>Note&nbsp;–</strong> the returned object is the live instance
+     * used for all SSH operations; creating a defensive copy is not feasible,
+     * so callers <em>must not</em> modify its global state (e.g.&nbsp;changing
+     * the identity repository or host‑key repository) once the {@code Device}
+     * has been built.
+     *
+     * @return the underlying {@link JSch} SSH client
+     */
+    @SuppressWarnings("EI_EXPOSE_REP") // Defensive copy not feasible for JSch
+    public JSch getSshClient() {
+        // Defensive copy not possible; document that caller must not modify
+        return sshClient;
+    }
+
+    /**
+     * Returns the DNS host name or IP address of the NETCONF server to which
+     * this {@code Device} instance will attempt to connect.
+     *
+     * @return host name or IP string
+     */
+    public String getHostName() {
+        return hostName;
+    }
+
+    /**
+     * Returns the TCP port on which the remote device’s NETCONF SSH subsystem
+     * is listening.  The default is {@code 830} unless explicitly overridden
+     * in the builder.
+     *
+     * @return NETCONF port number
+     */
+    public int getPort() {
+        return port;
+    }
+
+    /**
+     * Returns the maximum time, in milliseconds, to wait while establishing
+     * the underlying SSH transport connection before giving up.
+     *
+     * @return SSH connection timeout (milliseconds)
+     */
+    public int getConnectionTimeout() {
+        return connectionTimeout;
+    }
+
+    /**
+     * Returns the per‑command timeout configured for individual NETCONF RPCs.
+     *
+     * @return timeout in milliseconds
+     */
+    public int getCommandTimeout() {
+        return commandTimeout;
+    }
+
+    /**
+     * Returns the user name that will be used to authenticate the SSH session.
+     *
+     * @return login user name
+     */
+    public String getUserName() {
+        return userName;
+    }
+
+    /**
+     * Returns the password associated with {@link #getUserName()}, or
+     * {@code null} if key‑based authentication is configured.
+     *
+     * @return password string, or {@code null}
+     */
+    public String getPassword() {
+        return password;
+    }
+
+    /**
+     * Indicates whether key‑based SSH authentication is configured instead
+     * of password‑based authentication.
+     *
+     * @return {@code true} if key‑based authentication is configured
+     */
+    public boolean isKeyBasedAuthentication() {
+        return keyBasedAuthentication;
+    }
+
+    /**
+     * Returns the path to the PEM‑formatted private‑key file that will be
+     * used for key‑based authentication.
+     *
+     * @return PEM key file path, or {@code null} if password auth is used
+     */
+    public String getPemKeyFile() {
+        return pemKeyFile;
+    }
+
+    /**
+     * Returns whether strict host-key checking is enabled for this device.
+     *
+     * @return {@code true} if strict host-key checking is on
+     */
+    public boolean getStrictHostKeyChecking() {
+        return strictHostKeyChecking;
+    }
+
+    /**
+     * Returns the path to the SSH known-hosts file used for host-key checking.
+     *
+     * @return known-hosts file path, or {@code null} if none was provided
+     */
+    public String getHostKeysFileName() {
+        return hostKeysFileName;
+    }
+
+    /**
+     * Returns the DocumentBuilder used for XML parsing.
+     * <p>
+     * Defensive copy not possible; caller must not modify the returned instance.
+     *
+     * @return the {@link DocumentBuilder} in use
+     */
+    @SuppressWarnings("EI_EXPOSE_REP") // Defensive copy not feasible for DocumentBuilder
+    public DocumentBuilder getXmlBuilder() {
+        // Defensive copy not possible; document that caller must not modify
+        return xmlBuilder;
+    }
+
+    /**
+     * Returns an immutable copy of the capability URIs that this client
+     * advertises in its initial {@code &lt;hello&gt;} exchange.
+     *
+     * @return list of Netconf capability URIs
+     */
+    public List<String> getNetconfCapabilities() {
+        return new java.util.ArrayList<>(netconfCapabilities);
+    }
+
+    /**
+     * Returns the pre‑built NETCONF {@code &lt;hello&gt;} RPC payload that
+     * will be sent when a session is established.
+     *
+     * @return initial NETCONF {@code &lt;hello&gt;} RPC string
+     */
+    public String getHelloRpc() {
+        return helloRpc;
+    }
+
+    /**
+     * Returns the active SSH {@link ChannelSubsystem} used for NETCONF
+     * communication, or {@code null} if not yet connected.
+     *
+     * @return active SSH subsystem channel, or {@code null}
+     */
+    @SuppressWarnings("EI_EXPOSE_REP") // Defensive copy not feasible for active channel
+    public ChannelSubsystem getSshChannel() {
+        return sshChannel; // Defensive copy not feasible; caller must not modify
+    }
+
+    /**
+     * Returns the underlying SSH {@link Session}, or {@code null} if not
+     * connected.
+     *
+     * @return SSH session, or {@code null}
+     */
+    @SuppressWarnings("EI_EXPOSE_REP") // Defensive copy not feasible for active session
+    public Session getSshSession() {
+        return sshSession; // Defensive copy not feasible; caller must not modify
+    }
+
+    /**
+     * Returns the current {@link NetconfSession}, or {@code null} if no
+     * session has been established.
+     *
+     * @return active Netconf session, or {@code null}
+     */
+    @SuppressWarnings("EI_EXPOSE_REP") // Defensive copy not feasible for active session
+    public NetconfSession getNetconfSession() {
+        return netconfSession; // Defensive copy not feasible; caller must not modify
+    }
+
+    // Setters for mutable fields (if needed)
+
+    /**
+     * Sets the SSH channel subsystem.
+     * <p>
+     * Defensive copy not feasible; ensures non-null reference.
+     * The caller must not reuse or externally share the provided object after setting.
+     *
+     * @param sshChannel the SSH channel subsystem (must not be null)
+     * @throws NullPointerException if sshChannel is null
+     */
+    @SuppressWarnings("EI_EXPOSE_REP2") // Defensive copy not feasible for active channel
+    public void setSshChannel(ChannelSubsystem sshChannel) {
+        this.sshChannel = (ChannelSubsystem) Objects.requireNonNull(sshChannel);
+    }
+
+    /**
+     * Sets the SSH session.
+     * <p>
+     * Defensive copy not feasible; ensures non-null reference.
+     * The caller must not reuse or externally share the provided object after setting.
+     *
+     * @param sshSession the SSH session (must not be null)
+     * @throws NullPointerException if sshSession is null
+     */
+    @SuppressWarnings("EI_EXPOSE_REP2") // Defensive copy not feasible for active session
+    public void setSshSession(Session sshSession) {
+        this.sshSession = Objects.requireNonNull(sshSession);
+    }
+
+    /**
+     * Sets the Netconf session.
+     * <p>
+     * Defensive copy not feasible; ensures non-null reference.
+     * The caller must not reuse or externally share the provided object after setting.
+     *
+     * @param netconfSession the Netconf session (must not be null)
+     * @throws NullPointerException if netconfSession is null
+     */
+    @SuppressWarnings("EI_EXPOSE_REP2") // Defensive copy not feasible for active session
+    public void setNetconfSession(NetconfSession netconfSession) {
+        this.netconfSession = Objects.requireNonNull(netconfSession);
+    }
+
+    // equals(), hashCode(), toString()
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        Device device = (Device) o;
+        return port == device.port &&
+            connectionTimeout == device.connectionTimeout &&
+            commandTimeout == device.commandTimeout &&
+            keyBasedAuthentication == device.keyBasedAuthentication &&
+            strictHostKeyChecking == device.strictHostKeyChecking &&
+            java.util.Objects.equals(sshClient, device.sshClient) &&
+            java.util.Objects.equals(hostName, device.hostName) &&
+            java.util.Objects.equals(userName, device.userName) &&
+            java.util.Objects.equals(password, device.password) &&
+            java.util.Objects.equals(pemKeyFile, device.pemKeyFile) &&
+            java.util.Objects.equals(hostKeysFileName, device.hostKeysFileName) &&
+            java.util.Objects.equals(xmlBuilder, device.xmlBuilder) &&
+            java.util.Objects.equals(netconfCapabilities, device.netconfCapabilities) &&
+            java.util.Objects.equals(helloRpc, device.helloRpc);
+    }
+
+    @Override
+    public int hashCode() {
+        return java.util.Objects.hash(
+            sshClient, hostName, port, connectionTimeout, commandTimeout,
+            userName, password, keyBasedAuthentication, pemKeyFile,
+            strictHostKeyChecking, hostKeysFileName, xmlBuilder,
+            netconfCapabilities, helloRpc
+        );
+    }
+
+    @Override
+    public String toString() {
+        return "Device{" +
+            "sshClient=" + sshClient +
+            ", hostName='" + hostName + '\'' +
+            ", port=" + port +
+            ", connectionTimeout=" + connectionTimeout +
+            ", commandTimeout=" + commandTimeout +
+            ", userName='" + userName + '\'' +
+            ", password='" + (password != null ? "***" : null) + '\'' +
+            ", keyBasedAuthentication=" + keyBasedAuthentication +
+            ", pemKeyFile='" + pemKeyFile + '\'' +
+            ", strictHostKeyChecking=" + strictHostKeyChecking +
+            ", hostKeysFileName='" + hostKeysFileName + '\'' +
+            ", xmlBuilder=" + xmlBuilder +
+            ", netconfCapabilities=" + netconfCapabilities +
+            ", helloRpc='" + helloRpc + '\'' +
+            '}';
+    }
 }

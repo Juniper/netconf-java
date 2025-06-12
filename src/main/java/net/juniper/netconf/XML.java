@@ -7,6 +7,7 @@
  */
 
 package net.juniper.netconf;
+import java.util.logging.Logger;
 
 import com.google.common.base.Preconditions;
 
@@ -47,9 +48,22 @@ import static net.juniper.netconf.NetconfConstants.LF;
  */
 public class XML {
 
+    private static final Logger logger = Logger.getLogger(XML.class.getName());
     private final Element activeElement;
     private final Document ownerDoc;
 
+    /**
+     * Creates a new {@code XML} wrapper with the supplied DOM {@link Element} as its
+     * initial <em>active</em> element.
+     * <p>
+     * This constructor is intentionally <code>protected</code>; normal clients are
+     * expected to obtain {@code XML} instances via {@link XMLBuilder} rather than
+     * constructing them directly.  Keeping the constructor non‑public ensures the
+     * internal DOM is manipulated through the provided fluent API.
+     *
+     * @param active the DOM element that will serve as the current active node;
+     *               must not be {@code null}
+     */
     protected XML(Element active) {
         this.activeElement = active;
         ownerDoc = active.getOwnerDocument();
@@ -65,12 +79,14 @@ public class XML {
         return st;
     }
 
+
+
     /**
      * Get the owner Document for the XML object.
      * @return The org.w3c.dom.Document object for the XML
      */
     public Document getOwnerDocument() {
-        return this.ownerDoc;
+        return (Document) ownerDoc.cloneNode(true); // deep copy
     }
 
     /**
@@ -212,15 +228,21 @@ public class XML {
      *         text value as the key value.
      */
     public void addSiblings(Map<String, String> map) {
-        List<String> keyList = new ArrayList<>(map.keySet());
-        activeElement.getParentNode();
-        for (Object element : keyList) {
-            String elementName = (String) element;
-            String text = map.get(element);
-            Element newElement = ownerDoc.createElement(elementName);
-            Node textNode = ownerDoc.createTextNode(text);
-            newElement.appendChild(textNode);
-            activeElement.appendChild(newElement);        }
+        if (map == null || map.isEmpty()) {
+            return;
+        }
+
+        Node parent = activeElement.getParentNode();          // get the parent once
+        if (parent == null) {
+            throw new IllegalStateException(
+                "Cannot add siblings: active element has no parent");
+        }
+
+        for (Map.Entry<String, String> entry : map.entrySet()) {
+            Element e = ownerDoc.createElement(entry.getKey());
+            e.appendChild(ownerDoc.createTextNode(entry.getValue()));
+            parent.appendChild(e);                             // add to the *parent*
+        }
     }
 
     /**
@@ -275,6 +297,15 @@ public class XML {
     }
 
     /**
+     * Sets the text content of the active XML element.
+     *
+     * @param text The text content to set on the current active element.
+     */
+    public void setTextContent(String text) {
+        activeElement.setTextContent(text);
+    }
+
+    /**
      * Sets the attribute ("delete","delete") for the active element of XML
      * object.
      */
@@ -321,86 +352,89 @@ public class XML {
     }
 
     /**
-     * Find the text value of an element.
+     * Finds the text value of an element in the XML hierarchy specified by the list.
+     *
      * @param list
-     *          The String based list of elements which determine the hierarchy.
-     *          For example, for the below XML:
-     *          &lt;rpc-reply&gt;
-     *           &lt;environment-information&gt;
+     *        A list of strings representing the XML path. Each entry corresponds to an XML tag.
+     *        To apply a text filter, use "tag~text" syntax (e.g., "name~FPC 0 CPU").
+     *        For example, to extract &lt;temperature&gt; from:
+     *        &lt;rpc-reply&gt;
+     *          &lt;environment-information&gt;
      *            &lt;environment-item&gt;
-     *             &lt;name&gt;FPC 0 CPU&lt;/name&gt;
-     *              &lt;temperature&gt;
-     *          To find out the text value of temperature node, the list
-     *          should be- {"environment-information","environment-item",
-     *          "name~FPC 0 CPU","temperature"}
-     * @return The text value of the element.
+     *              &lt;name&gt;FPC 0 CPU&lt;/name&gt;
+     *              &lt;temperature&gt;55&lt;/temperature&gt;
+     *        the list should be:
+     *        {"environment-information", "environment-item", "name~FPC 0 CPU", "temperature"}
+     *
+     * @return The trimmed text value of the target element,
+     *         or {@code null} if the path is invalid, the list is empty/null,
+     *         or if the element has no text content.
      */
     public String findValue(List<String> list) {
+        if (list == null || list.isEmpty()) {
+            return null;
+        }
+
         Element nextElement = ownerDoc.getDocumentElement();
         boolean nextElementFound;
         for (int k=0; k<list.size(); k++) {
             nextElementFound = false;
             String nextElementName = list.get(k);
-            if (!nextElementName.contains("~")){
-                try {
-                    NodeList nextElementList = nextElement.
-                            getElementsByTagName(nextElementName);
-                    /* If the next to next(n2n) element is a filter based on
-                     * text value, then do the required filtering.
-                     * For example,
-                     * ....
-                     *     <physical-interface>
-                     *         <name>ge-1/0/0</name>
-                     *         <logical-interface>
-                     *             ....
-                     * In this case, the list passed to findValue function
-                     * should contain (..,"physical-interface","name~ge-1/0/0",
-                     * "logical-interface",..)
-                     * This will fetch me the required element.
-                     */
-                    String n2nString = null;
-                    if (k<list.size()-1)
-                        n2nString = list.get(k+1);
-                    if (n2nString != null && n2nString.contains("~")) {
-                        /* Since the n2n element is a filter based on text
-                         * value( decided by '~')
-                         * we now traverse the entire NodeList to find the
-                         * correct nextElement
-                         * based on the text value of the filter.
-                         */
-                        String n2nText = n2nString.substring(n2nString.
-                                indexOf("~") + 1);
-                        String n2nElementName = n2nString.substring(0,
-                                n2nString.indexOf("~"));
-                        for (int i=0; i<nextElementList.getLength(); i++) {
-                            nextElement = (Element)nextElementList.item(i);
-                            Element n2nElement = (Element)nextElement.
-                                    getElementsByTagName(n2nElementName).item(0);
-                            String text = n2nElement.getFirstChild().
-                                    getNodeValue();
-                            text = trim(text);
-                            if (text != null && text.equals(n2nText)) {
-                                nextElementFound = true;
-                                break;
-                            }
-                        }
-                        if (!nextElementFound)
-                            return null;
-                    } else {
-                        nextElement = (Element)nextElementList.item(0);
-                    }
-                } catch(NullPointerException e) {
+            if (!nextElementName.contains("~")) {
+                NodeList nextElementList =
+                        nextElement != null
+                                ? nextElement.getElementsByTagName(nextElementName)
+                                : null;
+                if (nextElementList == null || nextElementList.getLength() == 0) {
+                    logger.fine("Element '" + nextElementName + "' not found in findValue()");
                     return null;
                 }
-            }        }
-        if (nextElement == null || nextElement.getFirstChild() == null || nextElement.getFirstChild().getNodeValue()== null) {
+
+                /* If the next‑to‑next (n2n) element is a filter based on
+                 * text value, then do the required filtering.
+                 */
+                String n2nString = null;
+                if (k<list.size()-1)
+                    n2nString = list.get(k+1);
+                if (n2nString != null && n2nString.contains("~")) {
+                    /* Since the n2n element is a filter based on text
+                     * value( decided by '~')
+                     * we now traverse the entire NodeList to find the
+                     * correct nextElement
+                     * based on the text value of the filter.
+                     */
+                    String n2nText = n2nString.substring(n2nString.
+                            indexOf("~") + 1);
+                    String n2nElementName = n2nString.substring(0,
+                            n2nString.indexOf("~"));
+                    for (int i=0; i<nextElementList.getLength(); i++) {
+                        nextElement = (Element)nextElementList.item(i);
+                        NodeList nodes = nextElement.getElementsByTagName(n2nElementName);
+                        if (nodes.getLength() == 0) continue;
+                        Element n2nElement = (Element) nodes.item(0);
+                        if (n2nElement == null || n2nElement.getFirstChild() == null) continue;
+                        String text = trim(n2nElement.getFirstChild().getNodeValue());
+                        if (text.equals(n2nText)) {
+                            nextElementFound = true;
+                            break;
+                        }
+                    }
+                    if (!nextElementFound)
+                        return null;
+                } else {
+                    nextElement = (Element)nextElementList.item(0);
+                }
+            }
+        }
+        if (nextElement == null) {
             return null;
         }
-        String value = nextElement.getFirstChild().getNodeValue();
-        if (value == null) {
+        Node first = nextElement.getFirstChild();
+        if (first == null) {
             return null;
         }
-        return trim(value);
+        String value = first.getNodeValue();
+        return (value != null) ? trim(value) : null;
     }
 
     /**
@@ -426,56 +460,58 @@ public class XML {
             nextElementFound = false;
             String nextElementName = list.get(k);
             if (!nextElementName.contains("~")) {
-                try {
-                    NodeList nextElementList = nextElement.
-                            getElementsByTagName(nextElementName);
-                    /* If the next to next(n2n) element is a filter based on
-                     * text value,
-                     * then do the required filtering.
-                     * For example,
-                     * ....
-                     *     <physical-interface>
-                     *         <name>ge-1/0/0</name>
-                     *         <logical-interface>
-                     *             ....
-                     * In this case, the list passed to findValue function
-                     * should contain (..,"physical-interface","name~ge-1/0/0",
-                     * "logical-interface",..)
-                     * This will fetch me the required element.
-                     */
-                    String n2nString = null;
-                    if (k<list.size()-1)
-                        n2nString = list.get(k+1);
-                    if (n2nString != null && n2nString.contains("~")) {
-                        /* Since the n2n element is a filter based on text value
-                         * ( decided by '~')
-                         * we now traverse the entire NodeList to find the
-                         * correct nextElement
-                         * based on the text value of the filter.
-                         */
-                        String n2nText = n2nString.substring(n2nString.
-                                indexOf("~") + 1);
-                        String n2nElementName = n2nString.substring(0,
-                                n2nString.indexOf("~"));
-                        for (int i=0; i<nextElementList.getLength(); i++) {
-                            nextElement = (Element)nextElementList.item(i);
-                            Element n2nElement = (Element)nextElement.
-                                    getElementsByTagName(n2nElementName).item(0);
-                            String text = n2nElement.getFirstChild().
-                                    getNodeValue();
-                            text = trim(text);
-                            if (text != null && text.equals(n2nText)) {
-                                nextElementFound = true;
-                                break;
-                            }
-                        }
-                        if (!nextElementFound)
-                            return null;
-                    } else {
-                        nextElement = (Element)nextElementList.item(0);
-                    }
-                } catch(NullPointerException e) {
+                NodeList nextElementList =
+                        nextElement != null
+                                ? nextElement.getElementsByTagName(nextElementName)
+                                : null;
+                if (nextElementList == null || nextElementList.getLength() == 0) {
+                    logger.fine("Element '" + nextElementName + "' not found in findNodes()");
                     return null;
+                }
+                /* If the next to next(n2n) element is a filter based on
+                 * text value,
+                 * then do the required filtering.
+                 * For example,
+                 * ....
+                 *     <physical-interface>
+                 *         <name>ge-1/0/0</name>
+                 *         <logical-interface>
+                 *             ....
+                 * In this case, the list passed to findValue function
+                 * should contain (..,"physical-interface","name~ge-1/0/0",
+                 * "logical-interface",..)
+                 * This will fetch me the required element.
+                 */
+                String n2nString = null;
+                if (k<list.size()-1)
+                    n2nString = list.get(k+1);
+                if (n2nString != null && n2nString.contains("~")) {
+                    /* Since the n2n element is a filter based on text value
+                     * ( decided by '~')
+                     * we now traverse the entire NodeList to find the
+                     * correct nextElement
+                     * based on the text value of the filter.
+                     */
+                    String n2nText = n2nString.substring(n2nString.
+                            indexOf("~") + 1);
+                    String n2nElementName = n2nString.substring(0,
+                            n2nString.indexOf("~"));
+                    for (int i=0; i<nextElementList.getLength(); i++) {
+                        nextElement = (Element)nextElementList.item(i);
+                        Element n2nElement = (Element)nextElement.
+                                getElementsByTagName(n2nElementName).item(0);
+                        String text = n2nElement.getFirstChild().
+                                getNodeValue();
+                        text = trim(text);
+                        if (text.equals(n2nText)) {
+                            nextElementFound = true;
+                            break;
+                        }
+                    }
+                    if (!nextElementFound)
+                        return null;
+                } else {
+                    nextElement = (Element)nextElementList.item(0);
                 }
             }
         }

@@ -13,11 +13,14 @@ target
 # IntelliJ #
 *.iml
 .idea/
-.gradle/
-gradle/
+.gradle
+gradle/*
+!gradle/wrapper/
+!gradle/wrapper/gradle-wrapper.jar
+!gradle/wrapper/gradle-wrapper.properties
+
+build/
 libraries/
-gradlew
-gradlew.bat
 
 logs/
 log-test/
