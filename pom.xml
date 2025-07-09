@@ -7,7 +7,7 @@
 
     <groupId>net.juniper.netconf</groupId>
     <artifactId>netconf-java</artifactId>
-    <version>2.2.0.0</version>
+    <version>2.2.0.1</version>
     <packaging>jar</packaging>
 
     <properties>
@@ -217,7 +217,7 @@
         <dependency>
             <groupId>org.xmlunit</groupId>
             <artifactId>xmlunit-assertj</artifactId>
-            <version>2.9.0</version>
+            <version>2.10.0</version>
             <scope>test</scope>
         </dependency>
 
