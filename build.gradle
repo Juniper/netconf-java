@@ -2,11 +2,11 @@ plugins {
     id 'java'
     id 'jacoco'
     id 'maven-publish'
-    id 'com.github.spotbugs' version '6.0.6'
+    id 'com.github.spotbugs' version '6.2.2'
 }
 
 group = 'net.juniper.netconf'
-version = '2.2.0.1'
+version = '2.2.0.2'
 description = 'An API For NetConf client'
 
 java {
