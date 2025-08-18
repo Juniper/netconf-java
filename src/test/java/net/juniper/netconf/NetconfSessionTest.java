@@ -7,6 +7,7 @@ import net.juniper.netconf.element.RpcReply;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.slf4j.Logger;
@@ -16,8 +17,8 @@ import org.xmlunit.assertj.XmlAssert;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
-import java.io.BufferedReader;
 import java.io.BufferedOutputStream;
+import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -28,19 +29,19 @@ import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.anyString;
 import static org.mockito.Mockito.doReturn;
-import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.eq;
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -1103,5 +1104,191 @@ public class NetconfSessionTest {
         return "\n#" + payload.getBytes(StandardCharsets.UTF_8).length + "\n"
             + payload
             + "\n##\n";
+    }
+
+    @Test
+    @Timeout(value = 2, unit = TimeUnit.SECONDS)
+    void ifTheDeviceDoesNotRespondAnExceptionWillBeThrown() {
+        final Duration commandTimeoutDuration = Duration.ofSeconds(1);
+
+        final Instant startTime = Instant.now();
+        assertThatThrownBy(() -> createNetconfSession((int) commandTimeoutDuration.toMillis()))
+            .isInstanceOf(SocketTimeoutException.class)
+            .hasMessageStartingWith("Command timeout limit was exceeded");
+
+        final Duration executeRpcDuration = Duration.between(startTime, Instant.now());
+        // This should have taken about 1 second to time out
+        assertThat(executeRpcDuration)
+            .isGreaterThanOrEqualTo(commandTimeoutDuration);
+    }
+
+    @Test
+    @Timeout(value = 2, unit = TimeUnit.SECONDS)
+    void ifTheDeviceDoesNotRespondTheSessionCanStillBeUsed() throws Exception {
+
+        final Semaphore semaphore = new Semaphore(0);
+
+        final Duration commandTimeoutDuration = Duration.ofSeconds(1);
+
+        new Thread(() -> {
+            try {
+                // This is the "hello" from the device, in response to the "Hello" to the initial client ""hello"
+                outPipe.write(createHelloMessage().getBytes(StandardCharsets.UTF_8));
+                outPipe.write(DEVICE_PROMPT_BYTE);
+                outPipe.flush();
+
+                // Don't send any response until it's required
+                semaphore.acquire();
+                // Now send a second response
+                outPipe.write(FAKE_RPC_REPLY.getBytes(StandardCharsets.UTF_8));
+                outPipe.write(DEVICE_PROMPT_BYTE);
+                outPipe.flush();
+                outPipe.close();
+            } catch (final Exception e) {
+                log.error("Error in background thread", e);
+            }
+        }).start();
+        final NetconfSession netconfSession = createNetconfSession((int) commandTimeoutDuration.toMillis());
+        // We've now received a "FAKE_RPC_REPLY"
+
+        // Now send a request, but we're expecting a timeout as the device won't send it yet
+        final Instant startTime = Instant.now();
+        assertThatThrownBy(() -> netconfSession.getRpcReply("<some-command/>"))
+            .isInstanceOf(SocketTimeoutException.class)
+            .hasMessageStartingWith("Command timeout limit was exceeded");
+        final Duration executeRpcDuration = Duration.between(startTime, Instant.now());
+
+        // This should have taken about 1 second to time out
+        assertThat(executeRpcDuration)
+            .isGreaterThanOrEqualTo(commandTimeoutDuration);
+
+        // Try again - we should get a reply
+        semaphore.release(); // Ensure the device sends a response
+        final String rpcReply = netconfSession.getRpcReply("<some-command/>");
+        assertThat(rpcReply).isEqualTo(FAKE_RPC_REPLY);
+    }
+
+    @Test
+    @Timeout(value = 2, unit = TimeUnit.SECONDS)
+    void ifTheDeviceDoesNotRespondInChunkedModeAnExceptionWillBeThrown() throws Exception {
+        final Duration commandTimeoutDuration = Duration.ofSeconds(1);
+
+        // Hello is always legacy-framed, but advertises base:1.1 so subsequent replies are chunked
+        outPipe.write(createHelloMessageWithBase11().getBytes(StandardCharsets.UTF_8));
+        outPipe.write(DEVICE_PROMPT_BYTE);
+        outPipe.flush();
+        final NetconfSession netconfSession = createNetconfSession((int) commandTimeoutDuration.toMillis());
+
+        final Instant startTime = Instant.now();
+        assertThatThrownBy(() -> netconfSession.getRpcReply("<some-command/>"))
+            .isInstanceOf(SocketTimeoutException.class)
+            .hasMessageStartingWith("Command timeout limit was exceeded");
+
+        final Duration executeRpcDuration = Duration.between(startTime, Instant.now());
+        assertThat(executeRpcDuration)
+            .isGreaterThanOrEqualTo(commandTimeoutDuration);
+    }
+
+    @Test
+    @Timeout(value = 3, unit = TimeUnit.SECONDS)
+    void ifTheDeviceDoesNotRespondInChunkedModeTheSessionCanStillBeUsed() throws Exception {
+        final Semaphore semaphore = new Semaphore(0);
+        final Duration commandTimeoutDuration = Duration.ofSeconds(1);
+
+        new Thread(() -> {
+            try {
+                outPipe.write(createHelloMessageWithBase11().getBytes(StandardCharsets.UTF_8));
+                outPipe.write(DEVICE_PROMPT_BYTE);
+                outPipe.flush();
+
+                // Don't send any response until it's required
+                semaphore.acquire();
+                outPipe.write(toChunkedMessage(FAKE_RPC_REPLY).getBytes(StandardCharsets.UTF_8));
+                outPipe.flush();
+                outPipe.close();
+            } catch (final Exception e) {
+                log.error("Error in background thread", e);
+            }
+        }).start();
+        final NetconfSession netconfSession = createNetconfSession((int) commandTimeoutDuration.toMillis());
+
+        final Instant startTime = Instant.now();
+        assertThatThrownBy(() -> netconfSession.getRpcReply("<some-command/>"))
+            .isInstanceOf(SocketTimeoutException.class)
+            .hasMessageStartingWith("Command timeout limit was exceeded");
+        final Duration executeRpcDuration = Duration.between(startTime, Instant.now());
+        assertThat(executeRpcDuration)
+            .isGreaterThanOrEqualTo(commandTimeoutDuration);
+
+        // Try again - we should get a reply
+        semaphore.release();
+        final String rpcReply = netconfSession.getRpcReply("<some-command/>");
+        assertThat(rpcReply).isEqualTo(FAKE_RPC_REPLY);
+    }
+
+    @Test
+    @Timeout(value = 3, unit = TimeUnit.SECONDS)
+    void ifTheTimeoutHitsMidReplyInLegacyModeTheRestOfTheReplyIsStillDelivered() throws Exception {
+        outPipe.write(createHelloMessage().getBytes(StandardCharsets.UTF_8));
+        outPipe.write(DEVICE_PROMPT_BYTE);
+        outPipe.flush();
+        final NetconfSession netconfSession = createNetconfSession(300);
+
+        // Only the first half of the reply arrives before the timeout
+        outPipe.write("<rpc>fake".getBytes(StandardCharsets.UTF_8));
+        outPipe.flush();
+        assertThatThrownBy(() -> netconfSession.getRpcReply("<some-command/>"))
+            .isInstanceOf(SocketTimeoutException.class)
+            .hasMessageStartingWith("Command timeout limit was exceeded");
+
+        outPipe.write("data</rpc>".getBytes(StandardCharsets.UTF_8));
+        outPipe.write(DEVICE_PROMPT_BYTE);
+        outPipe.flush();
+        assertThat(netconfSession.getRpcReply("<some-command/>")).isEqualTo(FAKE_RPC_REPLY);
+    }
+
+    @Test
+    @Timeout(value = 3, unit = TimeUnit.SECONDS)
+    void ifTheTimeoutHitsMidReplyInChunkedModeTheRestOfTheReplyIsStillDelivered() throws Exception {
+        outPipe.write(createHelloMessageWithBase11().getBytes(StandardCharsets.UTF_8));
+        outPipe.write(DEVICE_PROMPT_BYTE);
+        outPipe.flush();
+        final NetconfSession netconfSession = createNetconfSession(300);
+
+        // The chunk header and part of the chunk arrive before the timeout
+        final String chunked = toChunkedMessage(FAKE_RPC_REPLY);
+        final int split = chunked.indexOf("fake") + 2;
+        outPipe.write(chunked.substring(0, split).getBytes(StandardCharsets.UTF_8));
+        outPipe.flush();
+        assertThatThrownBy(() -> netconfSession.getRpcReply("<some-command/>"))
+            .isInstanceOf(SocketTimeoutException.class)
+            .hasMessageStartingWith("Command timeout limit was exceeded");
+
+        outPipe.write(chunked.substring(split).getBytes(StandardCharsets.UTF_8));
+        outPipe.flush();
+        assertThat(netconfSession.getRpcReply("<some-command/>")).isEqualTo(FAKE_RPC_REPLY);
+    }
+
+    @Test
+    @Timeout(value = 3, unit = TimeUnit.SECONDS)
+    void executeRpcRunningTimesOutWhenTheDeviceStopsSendingAndCanResume() throws Exception {
+        outPipe.write(createHelloMessage().getBytes(StandardCharsets.UTF_8));
+        outPipe.write(DEVICE_PROMPT_BYTE);
+        outPipe.flush();
+        final NetconfSession netconfSession = createNetconfSession(300);
+
+        try (BufferedReader reader = netconfSession.executeRPCRunning("<some-command/>")) {
+            outPipe.write("<rpc>fake".getBytes(StandardCharsets.UTF_8));
+            outPipe.flush();
+
+            final char[] buffer = new char[9];
+            assertThat(reader.read(buffer)).isEqualTo(9);
+            assertThatThrownBy(reader::read).isInstanceOf(SocketTimeoutException.class);
+
+            outPipe.write("data</rpc>".getBytes(StandardCharsets.UTF_8));
+            outPipe.write(DEVICE_PROMPT_BYTE);
+            outPipe.flush();
+            assertThat(reader.readLine()).isEqualTo("data</rpc>");
+        }
     }
 }
