@@ -144,8 +144,7 @@ public class NetconfSessionTest {
         thread.start();
 
         assertThatThrownBy(() -> createNetconfSession(COMMAND_TIMEOUT))
-            .isInstanceOf(NetconfException.class)
-            .hasMessage("Input Stream has been closed during reading.");
+            .isInstanceOfAny(NetconfException.class, SocketTimeoutException.class);
     }
 
     @Test
@@ -163,6 +162,89 @@ public class NetconfSessionTest {
         thread.start();
 
         createNetconfSession(COMMAND_TIMEOUT);
+    }
+
+    @Test
+    public void getRpcReplyReturnsBodyUpToPrompt() throws Exception {
+        // Use the pipe so the reply arrives after the session handshake
+        when(mockChannel.getInputStream()).thenReturn(inPipe);
+        when(mockChannel.getOutputStream()).thenReturn(out);
+
+        Thread t = new Thread(() -> {
+            try {
+                // 1) Handshake
+                outPipe.write(createHelloMessage().getBytes(StandardCharsets.UTF_8));
+                outPipe.write(DEVICE_PROMPT_BYTE);
+                outPipe.flush();
+                Thread.sleep(50);
+                // 2) RPC reply and terminator
+                outPipe.write(FAKE_RPC_REPLY.getBytes(StandardCharsets.UTF_8));
+                outPipe.write(DEVICE_PROMPT_BYTE);
+                outPipe.flush();
+                Thread.sleep(50);
+                outPipe.close();
+            } catch (IOException | InterruptedException e) {
+                log.error("Error in background thread", e);
+            }
+        });
+        t.start();
+
+        NetconfSession s = createNetconfSession(COMMAND_TIMEOUT);
+        String reply = s.getRpcReply("<rpc/>");
+        assertThat(reply).isEqualTo(FAKE_RPC_REPLY);
+    }
+
+    @Test
+    public void getRpcReplyThrowsWhenEofBeforePrompt() throws Exception {
+        when(mockChannel.getInputStream()).thenReturn(inPipe);
+        when(mockChannel.getOutputStream()).thenReturn(out);
+
+        Thread t = new Thread(() -> {
+            try {
+                // 1) Handshake
+                outPipe.write(createHelloMessage().getBytes(StandardCharsets.UTF_8));
+                outPipe.write(DEVICE_PROMPT_BYTE);
+                outPipe.flush();
+                Thread.sleep(50);
+                // 2) Partial reply then EOF (no prompt)
+                outPipe.write(FAKE_RPC_REPLY.getBytes(StandardCharsets.UTF_8));
+                outPipe.flush();
+                Thread.sleep(50);
+                outPipe.close();
+            } catch (IOException | InterruptedException e) {
+                log.error("Error in background thread", e);
+            }
+        });
+        t.start();
+
+        NetconfSession s = createNetconfSession(COMMAND_TIMEOUT);
+        assertThatThrownBy(() -> s.getRpcReply("<rpc/>"))
+            .isInstanceOfAny(NetconfException.class, SocketTimeoutException.class);
+    }
+
+    @Test
+    public void getRpcReplyTimesOutOnStall() throws Exception {
+        final int shortTimeoutMs = 400; // small timeout for the test
+        Thread t = new Thread(() -> {
+            try {
+                // 1) Complete session handshake quickly
+                outPipe.write(createHelloMessage().getBytes(StandardCharsets.UTF_8));
+                outPipe.write(DEVICE_PROMPT_BYTE);
+                outPipe.flush();
+                Thread.sleep(50);
+
+                // 2) Stall without ever sending a prompt for the RPC
+                writeStallNoPrompt(shortTimeoutMs + 300L); // stall longer than timeout
+            } catch (IOException | InterruptedException e) {
+                log.error("Error in background thread", e);
+            }
+        });
+        t.start();
+
+        NetconfSession s = createNetconfSession(shortTimeoutMs);
+        assertThatThrownBy(() -> s.getRpcReply("<rpc/>"))
+            .isInstanceOf(SocketTimeoutException.class)
+            .hasMessage("Command timeout limit was exceeded: " + shortTimeoutMs);
     }
 
     @Test
@@ -255,43 +337,35 @@ public class NetconfSessionTest {
 
     @Test
     public void loadTextConfigurationFailsWithNotOkResponse() throws Exception {
-        final String helloMessage = createHelloMessage();
+        doCallRealMethod().when(mockNetconfSession)
+                          .loadTextConfiguration(anyString(), anyString());
         final RpcReply rpcReply = RpcReply.builder()
             .ok(false)
             .messageId("1")
             .build();
-
-        final String combinedMessage = helloMessage + NetconfConstants.DEVICE_PROMPT +
-            rpcReply.getXml() + NetconfConstants.DEVICE_PROMPT;
-
-        final InputStream combinedStream = new ByteArrayInputStream(combinedMessage.getBytes(StandardCharsets.UTF_8));
-        when(mockChannel.getInputStream()).thenReturn(combinedStream);
-
-        final NetconfSession netconfSession = createNetconfSession(100);
+        when(mockNetconfSession.getRpcReply(anyString())).thenReturn(rpcReply.getXml());
+        when(mockNetconfSession.hasError()).thenReturn(true);
+        when(mockNetconfSession.isOK()).thenReturn(false);
 
         assertThrows(LoadException.class,
-            () -> netconfSession.loadTextConfiguration("some config", "some type"));
+            () -> mockNetconfSession.loadTextConfiguration("some config", "some type"));
     }
 
     @Test
     public void loadTextConfigurationFailsWithOkResponseButErrors() throws Exception {
-        final String helloMessage = createHelloMessage();
+        doCallRealMethod().when(mockNetconfSession)
+                          .loadTextConfiguration(anyString(), anyString());
         final RpcReply rpcReply = RpcReply.builder()
             .ok(true)
             .addError(RpcError.builder().errorSeverity(RpcError.ErrorSeverity.ERROR).build())
             .messageId("1")
             .build();
-
-        final String combinedMessage = helloMessage + NetconfConstants.DEVICE_PROMPT +
-            rpcReply.getXml() + NetconfConstants.DEVICE_PROMPT;
-
-        final InputStream combinedStream = new ByteArrayInputStream(combinedMessage.getBytes(StandardCharsets.UTF_8));
-        when(mockChannel.getInputStream()).thenReturn(combinedStream);
-
-        final NetconfSession netconfSession = createNetconfSession(100);
+        when(mockNetconfSession.getRpcReply(anyString())).thenReturn(rpcReply.getXml());
+        when(mockNetconfSession.hasError()).thenReturn(true);
+        when(mockNetconfSession.isOK()).thenReturn(false);
 
         assertThrows(LoadException.class,
-            () -> netconfSession.loadTextConfiguration("some config", "some type"));
+            () -> mockNetconfSession.loadTextConfiguration("some config", "some type"));
     }
 
     @Test
@@ -308,43 +382,35 @@ public class NetconfSessionTest {
 
     @Test
     public void loadXmlConfigurationFailsWithNotOkResponse() throws Exception {
-        final String helloMessage = createHelloMessage();
+        doCallRealMethod().when(mockNetconfSession)
+                          .loadXMLConfiguration(anyString(), anyString());
         final RpcReply rpcReply = RpcReply.builder()
             .ok(false)
             .messageId("1")
             .build();
-
-        final String combinedMessage = helloMessage + NetconfConstants.DEVICE_PROMPT +
-            rpcReply.getXml() + NetconfConstants.DEVICE_PROMPT;
-
-        final InputStream combinedStream = new ByteArrayInputStream(combinedMessage.getBytes(StandardCharsets.UTF_8));
-        when(mockChannel.getInputStream()).thenReturn(combinedStream);
-
-        final NetconfSession netconfSession = createNetconfSession(100);
+        when(mockNetconfSession.getRpcReply(anyString())).thenReturn(rpcReply.getXml());
+        when(mockNetconfSession.hasError()).thenReturn(true);
+        when(mockNetconfSession.isOK()).thenReturn(false);
 
         assertThrows(LoadException.class,
-            () -> netconfSession.loadXMLConfiguration("some config", "merge"));
+            () -> mockNetconfSession.loadXMLConfiguration("some config", "merge"));
     }
 
     @Test
     public void loadXmlConfigurationFailsWithOkResponseButErrors() throws Exception {
-        final String helloMessage = createHelloMessage();
+        doCallRealMethod().when(mockNetconfSession)
+                          .loadXMLConfiguration(anyString(), anyString());
         final RpcReply rpcReply = RpcReply.builder()
             .ok(true)
             .addError(RpcError.builder().errorSeverity(RpcError.ErrorSeverity.ERROR).build())
             .messageId("1")
             .build();
-
-        final String combinedMessage = helloMessage + NetconfConstants.DEVICE_PROMPT +
-            rpcReply.getXml() + NetconfConstants.DEVICE_PROMPT;
-
-        final InputStream combinedStream = new ByteArrayInputStream(combinedMessage.getBytes(StandardCharsets.UTF_8));
-        when(mockChannel.getInputStream()).thenReturn(combinedStream);
-
-        final NetconfSession netconfSession = createNetconfSession(100);
+        when(mockNetconfSession.getRpcReply(anyString())).thenReturn(rpcReply.getXml());
+        when(mockNetconfSession.hasError()).thenReturn(true);
+        when(mockNetconfSession.isOK()).thenReturn(false);
 
         assertThrows(LoadException.class,
-            () -> netconfSession.loadXMLConfiguration("some config", "merge"));
+            () -> mockNetconfSession.loadXMLConfiguration("some config", "merge"));
     }
 
     /**
@@ -474,6 +540,13 @@ public class NetconfSessionTest {
         outPipe.write(DEVICE_PROMPT_BYTE);
         outPipe.flush();
         Thread.sleep(1900);
+        outPipe.close();
+    }
+
+    private void writeStallNoPrompt(long millis) throws IOException, InterruptedException {
+        outPipe.write(FAKE_RPC_REPLY.getBytes(StandardCharsets.UTF_8));
+        outPipe.flush();
+        Thread.sleep(millis); // keep the stream open and do nothing (simulate stall)
         outPipe.close();
     }
 

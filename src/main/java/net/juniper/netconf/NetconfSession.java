@@ -128,28 +128,71 @@ public class NetconfSession {
 
     @VisibleForTesting
     String getRpcReply(String rpc) throws IOException {
-        // write the rpc to the device
+        // Write the RPC to the device first
         sendRpcRequest(rpc);
 
-        final char[] buffer = new char[BUFFER_SIZE];
-        final StringBuilder rpcReply = new StringBuilder();
-        final long startTime = System.nanoTime();
-        final Reader in = new InputStreamReader(stdInStreamFromDevice, Charsets.UTF_8);
-        boolean timeoutNotExceeded = true;
-        int promptPosition;
-        while ((promptPosition = rpcReply.indexOf(NetconfConstants.DEVICE_PROMPT)) < 0 &&
-                (timeoutNotExceeded = (TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startTime) < commandTimeout))) {
-            int charsRead = in.read(buffer, 0, buffer.length);
-            if (charsRead < 0) throw new NetconfException("Input Stream has been closed during reading.");
-            rpcReply.append(buffer, 0, charsRead);
+        final StringBuilder rpcReply = new StringBuilder(8 * 1024);
+        final long deadlineNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(commandTimeout);
+
+        // We read raw bytes from the underlying InputStream to avoid Reader blocking
+        // on multibyte UTF-8 boundaries when only a few bytes are available.
+        final byte[] bbuf = new byte[BUFFER_SIZE];
+        final InputStream in = this.stdInStreamFromDevice;
+
+        int promptPosition = -1;
+        for (;;) {
+            // First, consume any bytes that are already buffered in the stream
+            final int avail = in.available();
+            if (avail > 0) {
+                int toRead = Math.min(avail, bbuf.length);
+                int bytesRead = in.read(bbuf, 0, toRead);
+                if (bytesRead < 0) {
+                    // Remote closed while reading
+                    throw new NetconfException("Input stream closed by remote device while reading RPC reply.");
+                }
+                rpcReply.append(new String(bbuf, 0, bytesRead, Charsets.UTF_8));
+
+                // Check if we've reached the DEVICE_PROMPT terminator
+                promptPosition = rpcReply.indexOf(NetconfConstants.DEVICE_PROMPT);
+                if (promptPosition >= 0) {
+                    break;
+                }
+                // Continue the loop to drain any remaining buffered data quickly
+                continue;
+            }
+
+            // If the SSH channel is closed and no more data is available, we won't get anything else.
+            if (netconfChannel.isClosed()) {
+                // Final attempt to read any pending bytes before declaring closure
+                int bytesRead = in.read(bbuf, 0, bbuf.length);
+                if (bytesRead > 0) {
+                    rpcReply.append(new String(bbuf, 0, bytesRead, Charsets.UTF_8));
+                    promptPosition = rpcReply.indexOf(NetconfConstants.DEVICE_PROMPT);
+                    if (promptPosition >= 0) {
+                        break;
+                    }
+                } else {
+                    throw new NetconfException("SSH channel closed by remote device while waiting for RPC reply.");
+                }
+            }
+
+            // Check overall timeout
+            if (System.nanoTime() > deadlineNanos) {
+                throw new SocketTimeoutException("Command timeout limit was exceeded: " + commandTimeout);
+            }
+
+            // No data yet; sleep briefly to avoid a tight spin
+            try {
+                Thread.sleep(10L);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                throw new NetconfException("Thread interrupted while waiting for RPC reply", ie);
+            }
         }
 
-        if (!timeoutNotExceeded)
-            throw new SocketTimeoutException("Command timeout limit was exceeded: " + commandTimeout);
-        // fixing the rpc reply by removing device prompt
+        // Remove device prompt and return the reply
         log.debug("Received Netconf RPC-Reply\n{}", rpcReply);
         rpcReply.setLength(promptPosition);
-
         return rpcReply.toString();
     }
 
