@@ -39,7 +39,14 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
+
+import static java.util.Optional.ofNullable;
 
 /**
  * A {@code NetconfSession} is obtained by first building a
@@ -59,6 +66,7 @@ import java.util.concurrent.TimeUnit;
 public class NetconfSession {
 
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(NetconfSession.class);
+    private final ExecutorService singleThreadExecutor = Executors.newSingleThreadExecutor();
 
     private final Channel netconfChannel;
     private String serverCapability;
@@ -127,30 +135,49 @@ public class NetconfSession {
     }
 
     @VisibleForTesting
-    String getRpcReply(String rpc) throws IOException {
+    String getRpcReply(final String rpc) throws IOException {
         // write the rpc to the device
         sendRpcRequest(rpc);
 
-        final char[] buffer = new char[BUFFER_SIZE];
-        final StringBuilder rpcReply = new StringBuilder();
-        final long startTime = System.nanoTime();
-        final Reader in = new InputStreamReader(stdInStreamFromDevice, Charsets.UTF_8);
-        boolean timeoutNotExceeded = true;
-        int promptPosition;
-        while ((promptPosition = rpcReply.indexOf(NetconfConstants.DEVICE_PROMPT)) < 0 &&
-                (timeoutNotExceeded = (TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startTime) < commandTimeout))) {
-            int charsRead = in.read(buffer, 0, buffer.length);
-            if (charsRead < 0) throw new NetconfException("Input Stream has been closed during reading.");
-            rpcReply.append(buffer, 0, charsRead);
-        }
+        final AtomicReference<Thread> threadReference = new AtomicReference<>();
+        try {
+            return singleThreadExecutor.submit(() -> {
+                    try {
 
-        if (!timeoutNotExceeded)
+                        threadReference.set(Thread.currentThread());
+                        final char[] buffer = new char[BUFFER_SIZE];
+                        final StringBuilder rpcReply = new StringBuilder();
+                        final Reader in = new InputStreamReader(stdInStreamFromDevice, Charsets.UTF_8);
+                        int promptPosition;
+                        while ((promptPosition = rpcReply.indexOf(NetconfConstants.DEVICE_PROMPT)) < 0) {
+                            int charsRead = in.read(buffer, 0, buffer.length);
+                            if (charsRead < 0) throw new NetconfException("Input Stream has been closed during reading.");
+                            rpcReply.append(buffer, 0, charsRead);
+                        }
+
+                        log.debug("Received Netconf RPC-Reply\n{}", rpcReply);
+                        rpcReply.setLength(promptPosition);
+                        return rpcReply.toString();
+
+                    } catch (final Exception e) {
+                        log.warn("Error reading from input stream", e);
+                        throw e;
+                    }
+                })
+                .get(commandTimeout, TimeUnit.MILLISECONDS);
+        } catch (final InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new NetconfException("Thread interrupted whilst waiting for RPC reply", e);
+        } catch (final ExecutionException e) {
+            if(e.getCause() instanceof NetconfException) {
+                throw (NetconfException) e.getCause();
+            }
+            throw new NetconfException("Unexpected exception whilst waiting for RPC reply", e);
+        } catch (final TimeoutException e) {
+            // Make sure the thread isn't still running
+            ofNullable(threadReference.get()).ifPresent(Thread::interrupt);
             throw new SocketTimeoutException("Command timeout limit was exceeded: " + commandTimeout);
-        // fixing the rpc reply by removing device prompt
-        log.debug("Received Netconf RPC-Reply\n{}", rpcReply);
-        rpcReply.setLength(promptPosition);
-
-        return rpcReply.toString();
+        }
     }
 
     private BufferedReader getRpcReplyRunning(String rpc) throws IOException {
