@@ -7,6 +7,7 @@ import net.juniper.netconf.element.RpcReply;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.slf4j.Logger;
@@ -25,17 +26,17 @@ import java.io.PipedOutputStream;
 import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.anyString;
-import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doCallRealMethod;
 import static org.mockito.Mockito.eq;
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 public class NetconfSessionTest {
@@ -488,5 +489,68 @@ public class NetconfSessionTest {
             + "  </capabilities>\n"
             + "  <session-id>27700</session-id>\n"
             + "</hello>";
+    }
+
+
+    @Test
+    @Timeout(value = 2, unit = TimeUnit.SECONDS)
+    void ifTheDeviceDoesNotRespondAnExceptionWillBeThrown() {
+        final Duration commandTimeoutDuration = Duration.ofSeconds(1);
+
+        final Instant startTime = Instant.now();
+        assertThatThrownBy(() -> createNetconfSession((int) commandTimeoutDuration.toMillis()))
+            .isInstanceOf(SocketTimeoutException.class)
+            .hasMessageStartingWith("Command timeout limit was exceeded");
+
+        final Duration executeRpcDuration = Duration.between(startTime, Instant.now());
+        // This should have taken about 1 second to time out
+        assertThat(executeRpcDuration)
+            .isGreaterThanOrEqualTo(commandTimeoutDuration);
+    }
+
+    @Test
+    @Timeout(value = 2, unit = TimeUnit.SECONDS)
+    void ifTheDeviceDoesNotRespondTheSessionCanStillBeUsed() throws Exception {
+
+        final Semaphore semaphore = new Semaphore(0);
+
+        final Duration commandTimeoutDuration = Duration.ofSeconds(1);
+
+        new Thread(() -> {
+            try {
+                // This is the "hello" from the device, in response to the "Hello" to the initial client ""hello"
+                outPipe.write(FAKE_RPC_REPLY.getBytes(StandardCharsets.UTF_8));
+                outPipe.write(DEVICE_PROMPT_BYTE);
+                outPipe.flush();
+
+                // Don't send any response until it's required
+                semaphore.acquire();
+                // Now send a second response
+                outPipe.write(FAKE_RPC_REPLY.getBytes(StandardCharsets.UTF_8));
+                outPipe.write(DEVICE_PROMPT_BYTE);
+                outPipe.flush();
+                outPipe.close();
+            } catch (final Exception e) {
+                log.error("Error in background thread", e);
+            }
+        }).start();
+        final NetconfSession netconfSession = createNetconfSession((int) commandTimeoutDuration.toMillis());
+        // We've now received a "FAKE_RPC_REPLY"
+
+        // Now send a request, but we're expecting a timeout as the device won't send it yet
+        final Instant startTime = Instant.now();
+        assertThatThrownBy(() -> netconfSession.getRpcReply("<some-command/>"))
+            .isInstanceOf(SocketTimeoutException.class)
+            .hasMessageStartingWith("Command timeout limit was exceeded");
+        final Duration executeRpcDuration = Duration.between(startTime, Instant.now());
+
+        // This should have taken about 1 second to time out
+        assertThat(executeRpcDuration)
+            .isGreaterThanOrEqualTo(commandTimeoutDuration);
+
+        // Try again - we should get a reply
+        semaphore.release(); // Ensure the device sends a response
+        final String rpcReply = netconfSession.getRpcReply("<some-command/>");
+        assertThat(rpcReply).isEqualTo(FAKE_RPC_REPLY);
     }
 }
