@@ -262,10 +262,12 @@ public class XML {
     public XML addPath(String path) {
         String[] elements = path.split("/");
         Preconditions.checkArgument(elements.length >= 1);
+        Element parent = activeElement;
         Element newElement = null;
         for (String element : elements) {
             newElement = ownerDoc.createElement(element);
-            activeElement.appendChild(newElement);
+            parent.appendChild(newElement);
+            parent = newElement;
         }
         return new XML(Objects.requireNonNull(newElement));
     }
