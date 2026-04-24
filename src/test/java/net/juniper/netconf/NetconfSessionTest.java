@@ -297,6 +297,32 @@ public class NetconfSessionTest {
     }
 
     @Test
+    public void sequentialExecuteRpcCallsStayAlignedWithLegacyFraming() throws Exception {
+        String firstReply = RpcReply.builder().ok(true).messageId("1").build().getXml();
+        String secondReply = RpcReply.builder().ok(true).messageId("2").build().getXml();
+        NetconfSession netconfSession = createNetconfSession(
+            new ByteArrayInputStream((createHelloMessage()
+                + NetconfConstants.DEVICE_PROMPT
+                + firstReply
+                + NetconfConstants.DEVICE_PROMPT
+                + secondReply
+                + NetconfConstants.DEVICE_PROMPT).getBytes(StandardCharsets.UTF_8)),
+            new ByteArrayOutputStream(),
+            100
+        );
+
+        XmlAssert.assertThat(netconfSession.executeRPC("<get/>").toString())
+            .and(firstReply)
+            .ignoreWhitespace()
+            .areIdentical();
+
+        XmlAssert.assertThat(netconfSession.executeRPC("<get/>").toString())
+            .and(secondReply)
+            .ignoreWhitespace()
+            .areIdentical();
+    }
+
+    @Test
     public void closeOnChunkedExecuteRpcRunningDrainsCurrentReplyForNextRpc() throws Exception {
         String firstReply = """
             <rpc-reply xmlns="urn:ietf:params:xml:ns:netconf:base:1.0" message-id="1">
@@ -322,6 +348,30 @@ public class NetconfSessionTest {
         assertThat(prefixLength).isPositive();
         assertThat(new String(prefix, 0, prefixLength)).startsWith("<rpc-reply");
         replyReader.close();
+
+        XmlAssert.assertThat(netconfSession.executeRPC("<get/>").toString())
+            .and(secondReply)
+            .ignoreWhitespace()
+            .areIdentical();
+    }
+
+    @Test
+    public void sequentialExecuteRpcCallsStayAlignedWithChunkedFraming() throws Exception {
+        String firstReply = RpcReply.builder().ok(true).messageId("1").build().getXml();
+        String secondReply = RpcReply.builder().ok(true).messageId("2").build().getXml();
+        NetconfSession netconfSession = createNetconfSession(
+            new ByteArrayInputStream((createHelloMessageWithBase11()
+                + NetconfConstants.DEVICE_PROMPT
+                + toChunkedMessage(firstReply)
+                + toChunkedMessage(secondReply)).getBytes(StandardCharsets.UTF_8)),
+            new ByteArrayOutputStream(),
+            100
+        );
+
+        XmlAssert.assertThat(netconfSession.executeRPC("<get/>").toString())
+            .and(firstReply)
+            .ignoreWhitespace()
+            .areIdentical();
 
         XmlAssert.assertThat(netconfSession.executeRPC("<get/>").toString())
             .and(secondReply)
