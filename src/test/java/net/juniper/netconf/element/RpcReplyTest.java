@@ -209,6 +209,22 @@ public class RpcReplyTest {
             .isInstanceOf(Exception.class);   // Xml parsing failed (SAXException or wrapped)
     }
 
+    @Test
+    public void willRejectDtdInRpcReply() {
+        String withDtd = """
+        <!DOCTYPE rpc-reply [
+           <!ELEMENT rpc-reply ANY >
+        ]>
+        <rpc-reply xmlns="urn:ietf:params:xml:ns:netconf:base:1.0" message-id="7">
+          <ok/>
+        </rpc-reply>
+        """;
+
+        assertThatThrownBy(() -> RpcReply.from(withDtd))
+            .isInstanceOf(Exception.class)
+            .hasMessageContaining("DOCTYPE");
+    }
+
     /**
      * RFC 6241 requires UTF‑8 encoding.  Passing bytes in ISO‑8859‑1 that contain
      * invalid UTF‑8 sequences should also raise a parse failure.
