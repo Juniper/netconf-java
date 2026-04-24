@@ -129,6 +129,17 @@ public class XMLTest {
     }
 
     @Test
+    public void GIVEN_multiSegmentPath_WHEN_addPath_THEN_createNestedHierarchy() throws Exception {
+        XMLBuilder builder = new XMLBuilder();
+        XML xml = builder.createNewXML("parent");
+
+        xml.addPath("level1/level2/leaf");
+
+        assertThat(xml.toString())
+            .containsIgnoringWhitespaces("<parent><level1><level2><leaf/></level2></level1></parent>");
+    }
+
+    @Test
     public void GIVEN_parentWithTwoItems_WHEN_findNodes_item_THEN_returnBoth() throws Exception {
         DocumentBuilder builder = factory.newDocumentBuilder();
         org.w3c.dom.Document doc = builder.newDocument();
