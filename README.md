@@ -105,30 +105,39 @@ public class ShowInterfaces {
     public static void main(String args[]) throws NetconfException,
                 ParserConfigurationException, SAXException, IOException {
 
-        //Create device
-        Device device = Device.builder()
-                            .hostName("hostname")
-                            .userName("username")
-                            .password("password")
-                            .connectionTimeout(2000)
-                            .hostKeysFileName("hostKeysFileName")
-                            .build(); 
-        device.connect();
+        try (Device device = Device.builder()
+                .hostName("hostname")
+                .userName("username")
+                .password("password")
+                .hostKeysFileName("hostKeysFileName")
+                .connectionTimeout(2000)
+                .commandTimeout(5000)
+                .build()) {
 
-        //Send RPC and receive RPC Reply as XML
-        XML rpc_reply = device.executeRPC("get-interface-information");
-        /* OR
-            * device.executeRPC("<get-interface-information/>");
-            * OR
-            * device.executeRPC("<rpc><get-interface-information/></rpc>");
-            */
+            // Establish the SSH transport and the default NETCONF session.
+            device.connect();
 
-        //Print the RPC-Reply and close the device.
-        System.out.println(rpc_reply);
-        device.close();
+            // Send RPC and receive RPC reply as XML.
+            XML rpcReply = device.executeRPC("get-interface-information");
+            /* OR
+             * device.executeRPC("<get-interface-information/>");
+             * OR
+             * device.executeRPC("<rpc><get-interface-information/></rpc>");
+             */
+
+            System.out.println(rpcReply);
+        }
     }
 }
 ```
+
+Recommended usage:
+
+* Build one `Device` per target connection and use `try-with-resources` so SSH resources are released predictably.
+* Call `connect()` before issuing RPCs. If `connect()` throws, no usable NETCONF session was established.
+* Set `connectionTimeout` and `commandTimeout` explicitly for production use rather than relying on defaults.
+* Prefer NETCONF RPC helpers (`executeRPC`, `getConfig`, `loadXMLConfiguration`, `commit`, and friends) for device operations; use shell helpers only for device-specific workflows that are not available over NETCONF.
+* Shell helper reads are bounded by `commandTimeout`. If you use `runShellCommandRunning(...)`, always close the returned reader so the underlying exec channel is released.
 
 LICENSE
 =======
