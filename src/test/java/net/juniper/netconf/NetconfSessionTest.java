@@ -16,8 +16,10 @@ import org.xmlunit.assertj.XmlAssert;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
+import java.io.BufferedReader;
 import java.io.BufferedOutputStream;
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.PipedInputStream;
@@ -25,6 +27,7 @@ import java.io.PipedOutputStream;
 import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -34,8 +37,10 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doCallRealMethod;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 public class NetconfSessionTest {
@@ -213,6 +218,15 @@ public class NetconfSessionTest {
     }
 
     @Test
+    public void fixupRpcPreservesExistingRpcTagsWithAttributes() throws Exception {
+        XMLBuilder builder = new XMLBuilder();
+        String rpc = builder.createNewRPC("get-interface-information", "terse").toString();
+
+        assertThat(NetconfSession.fixupRpc(rpc))
+            .isEqualTo(rpc + DEVICE_PROMPT);
+    }
+
+    @Test
     public void fixupRpcWrapsTaggedString() {
         assertThat(NetconfSession.fixupRpc("<fake string/>"))
             .isEqualTo("<rpc><fake string/></rpc>" + DEVICE_PROMPT);
@@ -239,6 +253,131 @@ public class NetconfSessionTest {
         assertThat(netconfSession.getSessionId()).isEqualTo("27700");
         assertThat(netconfSession.getServerHello().hasCapability(NetconfConstants.URN_IETF_PARAMS_NETCONF_BASE_1_0))
             .isTrue();
+    }
+
+    @Test
+    public void executeRpcSupportsChunkedRepliesAfterBase11Hello() throws Exception {
+        final String combinedMessage = createHelloMessageWithBase11()
+            + NetconfConstants.DEVICE_PROMPT
+            + toChunkedMessage(OK_RPC_REPLY);
+        final InputStream combinedStream = new ByteArrayInputStream(combinedMessage.getBytes(StandardCharsets.UTF_8));
+        when(mockChannel.getInputStream()).thenReturn(combinedStream);
+
+        final NetconfSession netconfSession = createNetconfSession(100);
+
+        assertThat(netconfSession.executeRPC("<get/>").toString())
+            .contains("<ok/>");
+    }
+
+    @Test
+    public void executeRpcRunningStripsLegacyFramingAndStopsAfterSingleReply() throws Exception {
+        String firstReply = RpcReply.builder().ok(true).messageId("1").build().getXml();
+        String secondReply = RpcReply.builder().ok(true).messageId("2").build().getXml();
+        NetconfSession netconfSession = createNetconfSession(
+            new ByteArrayInputStream((createHelloMessage()
+                + NetconfConstants.DEVICE_PROMPT
+                + firstReply
+                + NetconfConstants.DEVICE_PROMPT
+                + secondReply
+                + NetconfConstants.DEVICE_PROMPT).getBytes(StandardCharsets.UTF_8)),
+            new ByteArrayOutputStream(),
+            100
+        );
+
+        try (BufferedReader replyReader = netconfSession.executeRPCRunning("<get/>")) {
+            String streamedReply = readAll(replyReader);
+            assertThat(streamedReply).isEqualTo(firstReply);
+            assertThat(streamedReply).doesNotContain(NetconfConstants.DEVICE_PROMPT);
+        }
+
+        XmlAssert.assertThat(netconfSession.executeRPC("<get/>").toString())
+            .and(secondReply)
+            .ignoreWhitespace()
+            .areIdentical();
+    }
+
+    @Test
+    public void closeOnChunkedExecuteRpcRunningDrainsCurrentReplyForNextRpc() throws Exception {
+        String firstReply = """
+            <rpc-reply xmlns="urn:ietf:params:xml:ns:netconf:base:1.0" message-id="1">
+              <data>
+                <line>alpha</line>
+                <line>beta</line>
+              </data>
+            </rpc-reply>
+            """.trim();
+        String secondReply = RpcReply.builder().ok(true).messageId("2").build().getXml();
+        NetconfSession netconfSession = createNetconfSession(
+            new ByteArrayInputStream((createHelloMessageWithBase11()
+                + NetconfConstants.DEVICE_PROMPT
+                + toChunkedMessage(firstReply)
+                + toChunkedMessage(secondReply)).getBytes(StandardCharsets.UTF_8)),
+            new ByteArrayOutputStream(),
+            100
+        );
+
+        BufferedReader replyReader = netconfSession.executeRPCRunning("<get/>");
+        char[] prefix = new char[16];
+        int prefixLength = replyReader.read(prefix);
+        assertThat(prefixLength).isPositive();
+        assertThat(new String(prefix, 0, prefixLength)).startsWith("<rpc-reply");
+        replyReader.close();
+
+        XmlAssert.assertThat(netconfSession.executeRPC("<get/>").toString())
+            .and(secondReply)
+            .ignoreWhitespace()
+            .areIdentical();
+    }
+
+    @Test
+    public void executeRpcAddsMessageIdToAttributedRpcEnvelopeWhenMissing() throws Exception {
+        ByteArrayOutputStream capturedOutput = new ByteArrayOutputStream();
+        String rpcReply = RpcReply.builder().ok(true).messageId("1").build().getXml();
+        NetconfSession netconfSession = createNetconfSession(
+            helloThenReplyStream(rpcReply),
+            capturedOutput,
+            100
+        );
+
+        netconfSession.executeRPC("<rpc xmlns=\"" + NetconfConstants.URN_XML_NS_NETCONF_BASE_1_0 + "\"><get/></rpc>");
+
+        assertThat(capturedOutput.toString(StandardCharsets.UTF_8))
+            .contains("<rpc xmlns=\"" + NetconfConstants.URN_XML_NS_NETCONF_BASE_1_0 + "\" message-id=\"1\"><get/></rpc>"
+                + DEVICE_PROMPT);
+    }
+
+    @Test
+    public void executeRpcPreservesCallerSuppliedMessageId() throws Exception {
+        ByteArrayOutputStream capturedOutput = new ByteArrayOutputStream();
+        String rpcReply = RpcReply.builder().ok(true).messageId("77").build().getXml();
+        NetconfSession netconfSession = createNetconfSession(
+            helloThenReplyStream(rpcReply),
+            capturedOutput,
+            100
+        );
+
+        netconfSession.executeRPC("<rpc xmlns=\"" + NetconfConstants.URN_XML_NS_NETCONF_BASE_1_0
+            + "\" message-id=\"77\"><get/></rpc>");
+
+        assertThat(capturedOutput.toString(StandardCharsets.UTF_8))
+            .contains("<rpc xmlns=\"" + NetconfConstants.URN_XML_NS_NETCONF_BASE_1_0 + "\" message-id=\"77\"><get/></rpc>"
+                + DEVICE_PROMPT);
+    }
+
+    @Test
+    public void executeRpcRejectsMismatchedReplyMessageId() throws Exception {
+        String mismatchedReply = RpcReply.builder().ok(true).messageId("999").build().getXml();
+        NetconfSession netconfSession = createNetconfSession(
+            helloThenReplyStream(mismatchedReply),
+            new ByteArrayOutputStream(),
+            100
+        );
+
+        assertThatThrownBy(() -> netconfSession.executeRPC("<get/>"))
+            .isInstanceOf(NetconfException.class)
+            .hasMessageContaining("Mismatched rpc-reply message-id")
+            .hasMessageContaining("expected=1")
+            .hasMessageContaining("actual=999");
     }
 
     @Test
@@ -422,6 +561,21 @@ public class NetconfSessionTest {
         assertThat(mockNetconfSession.cancelCommit(null)).isFalse();
     }
 
+    @Test
+    public void commitThisConfigurationUnlocksCandidateWhenLoadFails() throws Exception {
+        doCallRealMethod().when(mockNetconfSession).commitThisConfiguration(anyString(), anyString());
+        when(mockNetconfSession.lockConfig()).thenReturn(true);
+        doThrow(new LoadException("boom")).when(mockNetconfSession).loadTextConfiguration(anyString(), anyString());
+
+        Path configFile = Files.createTempFile("netconf-java-", ".conf");
+        Files.writeString(configFile, "system { services { ftp; } }", StandardCharsets.UTF_8);
+
+        assertThatThrownBy(() -> mockNetconfSession.commitThisConfiguration(configFile.toString(), "merge"))
+            .isInstanceOf(LoadException.class);
+
+        verify(mockNetconfSession).unlockConfig();
+    }
+
     // Helper methods to reduce code duplication and improve readability
 
     private NetconfSession createNetconfSession(int commandTimeout) throws IOException {
@@ -433,6 +587,32 @@ public class NetconfSessionTest {
         }
 
         return new NetconfSession(mockChannel, CONNECTION_TIMEOUT, commandTimeout, FAKE_HELLO, builder);
+    }
+
+    private NetconfSession createNetconfSession(InputStream inputStream,
+                                                java.io.OutputStream outputStream,
+                                                int commandTimeout) throws IOException {
+        when(mockChannel.getInputStream()).thenReturn(inputStream);
+        when(mockChannel.getOutputStream()).thenReturn(outputStream);
+        return createNetconfSession(commandTimeout);
+    }
+
+    private InputStream helloThenReplyStream(String reply) {
+        String combinedMessage = createHelloMessage()
+            + NetconfConstants.DEVICE_PROMPT
+            + reply
+            + NetconfConstants.DEVICE_PROMPT;
+        return new ByteArrayInputStream(combinedMessage.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private String readAll(BufferedReader reader) throws IOException {
+        StringBuilder content = new StringBuilder();
+        char[] buffer = new char[128];
+        int read;
+        while ((read = reader.read(buffer)) != -1) {
+            content.append(buffer, 0, read);
+        }
+        return content.toString();
     }
 
     private void writeDataWithDelay() throws IOException, InterruptedException {
@@ -488,5 +668,21 @@ public class NetconfSessionTest {
             + "  </capabilities>\n"
             + "  <session-id>27700</session-id>\n"
             + "</hello>";
+    }
+
+    private String createHelloMessageWithBase11() {
+        return "<hello xmlns=\"urn:ietf:params:xml:ns:netconf:base:1.0\">\n"
+            + "  <capabilities>\n"
+            + "    <capability>urn:ietf:params:netconf:base:1.0</capability>\n"
+            + "    <capability>urn:ietf:params:netconf:base:1.1</capability>\n"
+            + "  </capabilities>\n"
+            + "  <session-id>27700</session-id>\n"
+            + "</hello>";
+    }
+
+    private String toChunkedMessage(String payload) {
+        return "\n#" + payload.getBytes(StandardCharsets.UTF_8).length + "\n"
+            + payload
+            + "\n##\n";
     }
 }

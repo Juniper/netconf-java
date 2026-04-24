@@ -21,5 +21,6 @@ public class TestConstants {
             "<capability>urn:ietf:params:netconf:base:1.0#url?protocol=http,ftp,file</capability>\n" +
             "</capabilities>\n" +
             "</hello>";
-    public static final String LLDP_REQUEST = "<rpc><get-lldp-neighbors-information></get-lldp-neighbors-information></rpc>";
+    public static final String LLDP_REQUEST =
+        "<rpc message-id=\"3\"><get-lldp-neighbors-information></get-lldp-neighbors-information></rpc>";
 }
