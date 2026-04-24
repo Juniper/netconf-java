@@ -1,5 +1,6 @@
 package net.juniper.netconf;
 
+import com.jcraft.jsch.ChannelExec;
 import com.jcraft.jsch.ChannelSubsystem;
 import com.jcraft.jsch.HostKeyRepository;
 import com.jcraft.jsch.JSch;
@@ -9,22 +10,26 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.xmlunit.assertj.XmlAssert;
 
+import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 public class DeviceTest {
@@ -117,41 +122,59 @@ public class DeviceTest {
     }
 
     @Test
-    public void GIVEN_sshAvailableNetconfNot_THEN_closeDevice() throws Exception {
+    public void GIVEN_channelSetupFails_WHEN_connect_THEN_disconnectPartialSshResources() throws Exception {
         JSch sshClient = mock(JSch.class);
         Session session = mock(Session.class);
         HostKeyRepository hostKeyRepository = mock(HostKeyRepository.class);
         ChannelSubsystem channel = mock(ChannelSubsystem.class);
-        when(channel.isConnected()).thenReturn(false);
+        AtomicBoolean sessionConnected = new AtomicBoolean(false);
+        AtomicBoolean channelConnected = new AtomicBoolean(false);
 
-        when(session.isConnected()).thenReturn(true);
+        when(session.isConnected()).thenAnswer(invocation -> sessionConnected.get());
+        doAnswer(invocation -> {
+            sessionConnected.set(true);
+            return null;
+        }).when(session).connect(eq(DEFAULT_TIMEOUT));
+        doAnswer(invocation -> {
+            sessionConnected.set(false);
+            return null;
+        }).when(session).disconnect();
+
+        when(channel.isConnected()).thenAnswer(invocation -> channelConnected.get());
+        when(channel.getInputStream()).thenReturn(new ByteArrayInputStream(new byte[0]));
+        when(channel.getOutputStream()).thenReturn(outputStream);
+        doAnswer(invocation -> {
+            channelConnected.set(false);
+            return null;
+        }).when(channel).disconnect();
+
         when(session.openChannel(eq(SUBSYSTEM))).thenReturn(channel);
         doThrow(new JSchException("failed to send channel request")).when(channel).connect(eq(DEFAULT_TIMEOUT));
 
         when(sshClient.getSession(eq(TEST_USERNAME), eq(TEST_HOSTNAME), eq(DEFAULT_NETCONF_PORT))).thenReturn(session);
         when(sshClient.getHostKeyRepository()).thenReturn(hostKeyRepository);
 
-        try (Device device = Device.builder()
-                .sshClient(sshClient)
-                .hostName(TEST_HOSTNAME)
-                .userName(TEST_USERNAME)
-                .password(TEST_PASSWORD)
-                .strictHostKeyChecking(false)
-                .build()) {
-            device.connect();
-        } catch (NetconfException e) {
-            // Do nothing
-        }
+        Device device = Device.builder()
+            .sshClient(sshClient)
+            .hostName(TEST_HOSTNAME)
+            .userName(TEST_USERNAME)
+            .password(TEST_PASSWORD)
+            .strictHostKeyChecking(false)
+            .build();
+
+        assertThatThrownBy(device::connect)
+            .isInstanceOf(NetconfException.class)
+            .hasMessageContaining("Failed to create Netconf session");
 
         verify(channel).connect(eq(DEFAULT_TIMEOUT));
         verify(channel).setSubsystem(anyString());
         verify(channel).getInputStream();
         verify(channel).getOutputStream();
-        verify(channel).isConnected();
+        verify(channel).disconnect();
 
         verify(session).disconnect();
         verify(session).openChannel(eq(SUBSYSTEM));
-        verify(session, times(2)).isConnected();
+        verify(session).isConnected();
         verify(session).getTimeout();
         verify(session).connect(eq(DEFAULT_TIMEOUT));
         verify(session).setTimeout(eq(DEFAULT_TIMEOUT));
@@ -162,9 +185,136 @@ public class DeviceTest {
         verify(sshClient).getHostKeyRepository();
         verify(sshClient).setHostKeyRepository(hostKeyRepository);
 
-        verifyNoMoreInteractions(channel);
-        verifyNoMoreInteractions(session);
-        verifyNoMoreInteractions(sshClient);
+        assertThat(sessionConnected.get()).isFalse();
+        assertThat(channelConnected.get()).isFalse();
+        assertThat(device.isConnected()).isFalse();
+    }
+
+    @Test
+    public void GIVEN_serverHelloInvalid_WHEN_connect_THEN_disconnectChannelAndSession() throws Exception {
+        JSch sshClient = mock(JSch.class);
+        Session session = mock(Session.class);
+        HostKeyRepository hostKeyRepository = mock(HostKeyRepository.class);
+        ChannelSubsystem channel = mock(ChannelSubsystem.class);
+        AtomicBoolean sessionConnected = new AtomicBoolean(false);
+        AtomicBoolean channelConnected = new AtomicBoolean(false);
+
+        when(session.isConnected()).thenAnswer(invocation -> sessionConnected.get());
+        doAnswer(invocation -> {
+            sessionConnected.set(true);
+            return null;
+        }).when(session).connect(eq(DEFAULT_TIMEOUT));
+        doAnswer(invocation -> {
+            sessionConnected.set(false);
+            return null;
+        }).when(session).disconnect();
+
+        when(channel.isConnected()).thenAnswer(invocation -> channelConnected.get());
+        when(channel.getInputStream()).thenReturn(new ByteArrayInputStream(
+            ("<hello>" + NetconfConstants.DEVICE_PROMPT).getBytes(StandardCharsets.UTF_8)));
+        when(channel.getOutputStream()).thenReturn(outputStream);
+        doAnswer(invocation -> {
+            channelConnected.set(true);
+            return null;
+        }).when(channel).connect(eq(DEFAULT_TIMEOUT));
+        doAnswer(invocation -> {
+            channelConnected.set(false);
+            return null;
+        }).when(channel).disconnect();
+
+        when(session.openChannel(eq(SUBSYSTEM))).thenReturn(channel);
+        when(sshClient.getSession(eq(TEST_USERNAME), eq(TEST_HOSTNAME), eq(DEFAULT_NETCONF_PORT))).thenReturn(session);
+        when(sshClient.getHostKeyRepository()).thenReturn(hostKeyRepository);
+
+        Device device = Device.builder()
+            .sshClient(sshClient)
+            .hostName(TEST_HOSTNAME)
+            .userName(TEST_USERNAME)
+            .password(TEST_PASSWORD)
+            .strictHostKeyChecking(false)
+            .build();
+
+        assertThatThrownBy(device::connect)
+            .isInstanceOf(NetconfException.class)
+            .hasMessageContaining("Invalid <hello> message from server");
+
+        verify(channel).connect(eq(DEFAULT_TIMEOUT));
+        verify(channel).disconnect();
+        verify(session).disconnect();
+        assertThat(sessionConnected.get()).isFalse();
+        assertThat(channelConnected.get()).isFalse();
+        assertThat(device.isConnected()).isFalse();
+    }
+
+    @Test
+    public void GIVEN_connectedDevice_WHEN_runShellCommand_THEN_connectExecChannelAndDisconnectIt() throws Exception {
+        Device device = createConnectedDeviceForShellCommands();
+        ChannelExec execChannel = mock(ChannelExec.class);
+        when(device.getSshSession().openChannel("exec")).thenReturn(execChannel);
+        when(execChannel.getInputStream()).thenReturn(new ByteArrayInputStream("show version\n".getBytes(StandardCharsets.UTF_8)));
+        when(execChannel.isClosed()).thenReturn(true);
+
+        String reply = device.runShellCommand("show version");
+
+        assertThat(reply).isEqualTo("show version\n");
+        verify(execChannel).setCommand("show version");
+        verify(execChannel).connect(DEFAULT_TIMEOUT);
+        verify(execChannel).disconnect();
+    }
+
+    @Test
+    public void GIVEN_connectedDevice_WHEN_runShellCommandRunning_THEN_closeReaderDisconnectsExecChannel() throws Exception {
+        Device device = createConnectedDeviceForShellCommands();
+        ChannelExec execChannel = mock(ChannelExec.class);
+        when(device.getSshSession().openChannel("exec")).thenReturn(execChannel);
+        when(execChannel.getInputStream()).thenReturn(new ByteArrayInputStream("stream line\n".getBytes(StandardCharsets.UTF_8)));
+
+        BufferedReader reader = device.runShellCommandRunning("monitor interfaces");
+
+        assertThat(reader.readLine()).isEqualTo("stream line");
+        verify(execChannel).setCommand("monitor interfaces");
+        verify(execChannel).connect(DEFAULT_TIMEOUT);
+        verify(execChannel, times(0)).disconnect();
+
+        reader.close();
+
+        verify(execChannel).disconnect();
+    }
+
+    @Test
+    public void GIVEN_connectedDevice_WHEN_runShellCommandStalls_THEN_commandTimeoutApplies() throws Exception {
+        Device device = createConnectedDeviceForShellCommands(50);
+        ChannelExec execChannel = mock(ChannelExec.class);
+        when(device.getSshSession().openChannel("exec")).thenReturn(execChannel);
+        when(execChannel.getInputStream()).thenReturn(nonBlockingIdleInputStream());
+        when(execChannel.isClosed()).thenReturn(false);
+
+        assertThatThrownBy(() -> device.runShellCommand("show interfaces terse"))
+            .isInstanceOf(SocketTimeoutException.class)
+            .hasMessage("Command timeout limit was exceeded: 50");
+
+        verify(execChannel).connect(DEFAULT_TIMEOUT);
+        verify(execChannel).disconnect();
+    }
+
+    @Test
+    public void GIVEN_connectedDevice_WHEN_runningShellCommandStalls_THEN_readTimesOut() throws Exception {
+        Device device = createConnectedDeviceForShellCommands(50);
+        ChannelExec execChannel = mock(ChannelExec.class);
+        when(device.getSshSession().openChannel("exec")).thenReturn(execChannel);
+        when(execChannel.getInputStream()).thenReturn(nonBlockingIdleInputStream());
+        when(execChannel.isClosed()).thenReturn(false);
+
+        BufferedReader reader = device.runShellCommandRunning("monitor interfaces");
+
+        assertThatThrownBy(reader::readLine)
+            .isInstanceOf(SocketTimeoutException.class)
+            .hasMessage("Command timeout limit was exceeded: 50");
+
+        reader.close();
+
+        verify(execChannel).connect(DEFAULT_TIMEOUT);
+        verify(execChannel).disconnect();
     }
 
     @Test
@@ -252,5 +402,40 @@ public class DeviceTest {
         when(sshClient.getSession(eq(TEST_USERNAME), eq(TEST_HOSTNAME), eq(DEFAULT_NETCONF_PORT)))
             .thenReturn(sshSession);
         return sshClient;
+    }
+
+    private Device createConnectedDeviceForShellCommands() throws NetconfException {
+        return createConnectedDeviceForShellCommands(DEFAULT_TIMEOUT);
+    }
+
+    private Device createConnectedDeviceForShellCommands(int commandTimeout) throws NetconfException {
+        Device device = Device.builder()
+            .hostName(TEST_HOSTNAME)
+            .userName(TEST_USERNAME)
+            .password(TEST_PASSWORD)
+            .strictHostKeyChecking(false)
+            .commandTimeout(commandTimeout)
+            .build();
+        Session session = mock(Session.class);
+        ChannelSubsystem netconfChannel = mock(ChannelSubsystem.class);
+        when(session.isConnected()).thenReturn(true);
+        when(netconfChannel.isConnected()).thenReturn(true);
+        device.setSshSession(session);
+        device.setSshChannel(netconfChannel);
+        return device;
+    }
+
+    private InputStream nonBlockingIdleInputStream() {
+        return new InputStream() {
+            @Override
+            public int read() {
+                return -1;
+            }
+
+            @Override
+            public int available() {
+                return 0;
+            }
+        };
     }
 }
