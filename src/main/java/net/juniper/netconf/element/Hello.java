@@ -180,7 +180,7 @@ public class Hello extends AbstractNetconfElement {
          */
         public Hello build() {
             // RFC 6241 § 8.1 — each peer MUST advertise at least the base 1.1 capability
-            final String BASE_11 = "urn:ietf:params:netconf:base:1.1";
+            final String BASE_11 = NetconfConstants.URN_IETF_PARAMS_NETCONF_BASE_1_1;
 
             List<String> caps = capabilities == null
                     ? new java.util.ArrayList<>()

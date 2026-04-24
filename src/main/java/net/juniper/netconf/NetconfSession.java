@@ -9,7 +9,6 @@
 package net.juniper.netconf;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Charsets;
 import com.jcraft.jsch.Channel;
 import com.jcraft.jsch.JSchException;
 import net.juniper.netconf.element.Datastore;
@@ -23,23 +22,27 @@ import org.xml.sax.SAXException;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.ParserConfigurationException;
 import javax.xml.xpath.XPathExpressionException;
+import java.io.ByteArrayOutputStream;
 import java.io.BufferedReader;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
-import java.io.Reader;
 import java.io.StringReader;
 import java.net.SocketTimeoutException;
 import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * A {@code NetconfSession} is obtained by first building a
@@ -88,6 +91,17 @@ public class NetconfSession {
     private static final String EMPTY_CONFIGURATION_TAG = "<configuration></configuration>";
     private static final String RUNNING_CONFIG = "running";
     private static final String NETCONF_SYNTAX_ERROR_MSG_FROM_DEVICE = "netconf error: syntax error";
+    private static final byte[] DEVICE_PROMPT_BYTES = NetconfConstants.DEVICE_PROMPT.getBytes(StandardCharsets.UTF_8);
+    private static final Pattern RPC_START_TAG_PATTERN = Pattern.compile("^<rpc\\b([^>]*)>", Pattern.DOTALL);
+    private static final Pattern MESSAGE_ID_ATTRIBUTE_PATTERN =
+        Pattern.compile("\\bmessage-id\\s*=\\s*(['\"])(.*?)\\1", Pattern.DOTALL);
+    private static final Pattern XML_DECLARATION_PATTERN =
+        Pattern.compile("^<\\?xml[^>]*\\?>\\s*", Pattern.DOTALL);
+
+    private boolean useChunkedFraming;
+    private byte[] unreadBytes = new byte[0];
+
+    private record PreparedRpc(String xml, String messageId) { }
 
     NetconfSession(Channel netconfChannel, int timeout, String hello,
                    DocumentBuilder builder) throws IOException {
@@ -128,50 +142,111 @@ public class NetconfSession {
 
     @VisibleForTesting
     String getRpcReply(String rpc) throws IOException {
-        // write the rpc to the device
-        sendRpcRequest(rpc);
+        PreparedRpc preparedRpc = sendRpcRequest(rpc);
+        String reply;
+        if (startsWithChunkedFraming()) {
+            reply = readChunkedRpcReply();
+        } else {
+            reply = readLegacyRpcReply();
+        }
+        validateReplyMessageId(preparedRpc.messageId(), reply);
+        return reply;
+    }
 
-        final char[] buffer = new char[BUFFER_SIZE];
-        final StringBuilder rpcReply = new StringBuilder();
+    private String readLegacyRpcReply() throws IOException {
+        final byte[] buffer = new byte[BUFFER_SIZE];
+        final ByteArrayOutputStream rpcReply = new ByteArrayOutputStream();
         final long startTime = System.nanoTime();
-        final Reader in = new InputStreamReader(stdInStreamFromDevice, Charsets.UTF_8);
         boolean timeoutNotExceeded = true;
-        int promptPosition;
-        while ((promptPosition = rpcReply.indexOf(NetconfConstants.DEVICE_PROMPT)) < 0 &&
-                (timeoutNotExceeded = (TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startTime) < commandTimeout))) {
-            int charsRead = in.read(buffer, 0, buffer.length);
-            if (charsRead < 0) throw new NetconfException("Input Stream has been closed during reading.");
-            rpcReply.append(buffer, 0, charsRead);
+        int promptPosition = -1;
+        while (promptPosition < 0 &&
+                (timeoutNotExceeded = !commandTimedOut(startTime))) {
+            int bytesRead = readIncomingBytes(buffer);
+            if (bytesRead < 0) {
+                throw new NetconfException("Input Stream has been closed during reading.");
+            }
+            rpcReply.write(buffer, 0, bytesRead);
+            byte[] rpcReplyBytes = rpcReply.toByteArray();
+            promptPosition = indexOf(rpcReplyBytes, DEVICE_PROMPT_BYTES);
+            if (promptPosition >= 0) {
+                int unreadStart = promptPosition + DEVICE_PROMPT_BYTES.length;
+                if (unreadStart < rpcReplyBytes.length) {
+                    pushBackBytes(Arrays.copyOfRange(rpcReplyBytes, unreadStart, rpcReplyBytes.length));
+                }
+                String reply = new String(rpcReplyBytes, 0, promptPosition, StandardCharsets.UTF_8);
+                log.debug("Received Netconf RPC-Reply\n{}", reply);
+                return reply;
+            }
         }
 
-        if (!timeoutNotExceeded)
-            throw new SocketTimeoutException("Command timeout limit was exceeded: " + commandTimeout);
-        // fixing the rpc reply by removing device prompt
-        log.debug("Received Netconf RPC-Reply\n{}", rpcReply);
-        rpcReply.setLength(promptPosition);
+        throw new SocketTimeoutException("Command timeout limit was exceeded: " + commandTimeout);
+    }
 
-        return rpcReply.toString();
+    private String readChunkedRpcReply() throws IOException {
+        final long startTime = System.nanoTime();
+        final ByteArrayOutputStream rpcReply = new ByteArrayOutputStream();
+        while (!commandTimedOut(startTime)) {
+            String header = readChunkHeaderLine(startTime);
+            if (header.isEmpty()) {
+                continue;
+            }
+            if ("##".equals(header)) {
+                String reply = rpcReply.toString(StandardCharsets.UTF_8);
+                log.debug("Received Netconf RPC-Reply\n{}", reply);
+                return reply;
+            }
+            if (!header.startsWith("#")) {
+                throw new NetconfException("Invalid NETCONF chunked framing header: " + header);
+            }
+            int chunkSize;
+            try {
+                chunkSize = Integer.parseInt(header.substring(1));
+            } catch (NumberFormatException e) {
+                throw new NetconfException("Invalid NETCONF chunk size: " + header, e);
+            }
+            if (chunkSize < 0) {
+                throw new NetconfException("Invalid NETCONF chunk size: " + header);
+            }
+            rpcReply.write(readExactBytes(chunkSize, startTime));
+        }
+        throw new SocketTimeoutException("Command timeout limit was exceeded: " + commandTimeout);
     }
 
     private BufferedReader getRpcReplyRunning(String rpc) throws IOException {
         sendRpcRequest(rpc);
         return new BufferedReader(
-                new InputStreamReader(stdInStreamFromDevice, Charsets.UTF_8));
+                new InputStreamReader(createRpcReplyInputStream(), StandardCharsets.UTF_8));
     }
 
-    private void sendRpcRequest(String rpc) throws IOException {
-        // RFC conformance for XML type, namespaces and message ids for RPCs
-        messageId++;
-        rpc = rpc.replace("<rpc>", "<rpc" + getRpcAttributes() + " message-id=\"" + messageId + "\">").trim();
-        rpc = rpc.replace("<datastore>", "<datastore xmlns:ds=\"urn:ietf:params:xml:ns:yang:ietf-datastores\">");
-        rpc = rpc.replace("<get-data>", "<get-data xmlns=\"urn:ietf:params:xml:ns:yang:ietf-netconf-nmda\">");
-        if (!rpc.contains(NetconfConstants.XML_VERSION)) {
-            rpc = NetconfConstants.XML_VERSION + rpc;
-        }
-        // writing the rpc to the device
-        log.debug("Sending Netconf RPC\n{}", rpc);
-        stdOutStreamToDevice.write(rpc.getBytes(Charsets.UTF_8));
+    private InputStream createRpcReplyInputStream() {
+        return useChunkedFraming ? new ChunkedRpcReplyInputStream() : new LegacyRpcReplyInputStream();
+    }
+
+    private PreparedRpc sendRpcRequest(String rpc) throws IOException {
+        PreparedRpc preparedRpc = prepareRpcRequest(rpc);
+        log.debug("Sending Netconf RPC\n{}", preparedRpc.xml());
+        stdOutStreamToDevice.write(applyTransportFraming(preparedRpc.xml()));
         stdOutStreamToDevice.flush();
+        return preparedRpc;
+    }
+
+    private PreparedRpc prepareRpcRequest(String rpc) {
+        String normalizedRpc = stripLegacyEndOfMessage(rpc).trim();
+        String expectedMessageId = null;
+        if (isHelloMessage(normalizedRpc)) {
+            return new PreparedRpc(addXmlDeclarationIfMissing(normalizedRpc), null);
+        }
+        if (isRpcEnvelope(normalizedRpc)) {
+            messageId++;
+            expectedMessageId = extractRpcMessageId(normalizedRpc);
+            if (expectedMessageId == null) {
+                expectedMessageId = String.valueOf(messageId);
+                normalizedRpc = injectMessageId(normalizedRpc, expectedMessageId);
+            }
+        }
+        normalizedRpc = normalizedRpc.replace("<datastore>", "<datastore xmlns:ds=\"urn:ietf:params:xml:ns:yang:ietf-datastores\">");
+        normalizedRpc = normalizedRpc.replace("<get-data>", "<get-data xmlns=\"urn:ietf:params:xml:ns:yang:ietf-netconf-nmda\">");
+        return new PreparedRpc(addXmlDeclarationIfMissing(normalizedRpc), expectedMessageId);
     }
 
     /**
@@ -246,6 +321,7 @@ public class NetconfSession {
         this.lastRpcReply = reply;
         try {
             this.serverHello = Hello.from(reply);
+            this.useChunkedFraming = serverHello.hasCapability(NetconfConstants.URN_IETF_PARAMS_NETCONF_BASE_1_1);
         } catch (final ParserConfigurationException | SAXException | XPathExpressionException e) {
             throw new NetconfException("Invalid <hello> message from server: " + reply, e);
         }
@@ -473,13 +549,14 @@ public class NetconfSession {
         if (rpcContent == null) {
             throw new IllegalArgumentException("Null RPC");
         }
-        rpcContent = rpcContent.trim();
-        if (!rpcContent.startsWith("<rpc>") && !rpcContent.equals("<rpc/>")) {
-            if (rpcContent.startsWith("<"))
-                rpcContent = "<rpc>" + rpcContent + "</rpc>";
-            else
-                rpcContent = "<rpc>" + "<" + rpcContent + "/>" + "</rpc>";
+        String trimmedRpcContent = rpcContent.trim();
+        if (isRpcEnvelope(trimmedRpcContent)) {
+            return rpcContent + NetconfConstants.DEVICE_PROMPT;
         }
+        if (trimmedRpcContent.startsWith("<"))
+                rpcContent = "<rpc>" + trimmedRpcContent + "</rpc>";
+            else
+                rpcContent = "<rpc>" + "<" + trimmedRpcContent + "/>" + "</rpc>";
         return rpcContent + NetconfConstants.DEVICE_PROMPT;
     }
 
@@ -779,7 +856,12 @@ public class NetconfSession {
     public void commitThisConfiguration(String configFile, String loadType) throws IOException, SAXException {
         String configuration = readConfigFile(configFile);
         configuration = configuration.trim();
-        if (this.lockConfig()) {
+        if (!this.lockConfig()) {
+            throw new IOException("Unclean lock operation. Cannot proceed " +
+                    "further.");
+        }
+        Throwable pendingFailure = null;
+        try {
             if (configuration.startsWith("<")) {
                 this.loadXMLConfiguration(configuration, loadType);
             } else if (configuration.startsWith("set")) {
@@ -788,11 +870,20 @@ public class NetconfSession {
                 this.loadTextConfiguration(configuration, loadType);
             }
             this.commit();
-        } else {
-            throw new IOException("Unclean lock operation. Cannot proceed " +
-                    "further.");
+        } catch (Throwable t) {
+            pendingFailure = t;
+            throw t;
+        } finally {
+            try {
+                this.unlockConfig();
+            } catch (IOException e) {
+                if (pendingFailure != null) {
+                    pendingFailure.addSuppressed(e);
+                } else {
+                    throw e;
+                }
+            }
         }
-        this.unlockConfig();
     }
 
     /**
@@ -1126,5 +1217,368 @@ public class NetconfSession {
     public void removeAllRPCAttributes() {
         rpcAttrMap.clear();
         rpcAttributes = null;
+    }
+
+    private static boolean isRpcEnvelope(String rpcContent) {
+        String normalizedRpcContent = stripXmlDeclaration(rpcContent.trim());
+        if (!normalizedRpcContent.startsWith("<rpc")) {
+            return false;
+        }
+        if (normalizedRpcContent.length() == 4) {
+            return false;
+        }
+        char next = normalizedRpcContent.charAt(4);
+        return next == '>' || next == '/' || Character.isWhitespace(next);
+    }
+
+    private static String stripLegacyEndOfMessage(String rpc) {
+        String trimmed = rpc.trim();
+        if (trimmed.endsWith(NetconfConstants.DEVICE_PROMPT)) {
+            return trimmed.substring(0, trimmed.length() - NetconfConstants.DEVICE_PROMPT.length()).trim();
+        }
+        return trimmed;
+    }
+
+    private static String stripXmlDeclaration(String xml) {
+        return XML_DECLARATION_PATTERN.matcher(xml).replaceFirst("");
+    }
+
+    private static String addXmlDeclarationIfMissing(String xml) {
+        return xml.startsWith("<?xml") ? xml : NetconfConstants.XML_VERSION + xml;
+    }
+
+    private static boolean isHelloMessage(String xml) {
+        return stripXmlDeclaration(xml).startsWith("<hello");
+    }
+
+    private static boolean isRpcReply(String xml) {
+        return stripXmlDeclaration(xml).startsWith("<rpc-reply");
+    }
+
+    private String extractRpcMessageId(String rpc) {
+        Matcher startTagMatcher = RPC_START_TAG_PATTERN.matcher(stripXmlDeclaration(rpc));
+        if (!startTagMatcher.find()) {
+            return null;
+        }
+        Matcher messageIdMatcher = MESSAGE_ID_ATTRIBUTE_PATTERN.matcher(startTagMatcher.group(1));
+        if (!messageIdMatcher.find()) {
+            return null;
+        }
+        return messageIdMatcher.group(2);
+    }
+
+    private String injectMessageId(String rpc, String generatedMessageId) {
+        Matcher startTagMatcher = RPC_START_TAG_PATTERN.matcher(stripXmlDeclaration(rpc));
+        if (!startTagMatcher.find()) {
+            return rpc;
+        }
+        String existingAttributes = startTagMatcher.group(1);
+        String updatedRpc = "<rpc" + existingAttributes + getMissingRpcAttributes(existingAttributes)
+            + " message-id=\"" + generatedMessageId + "\">"
+            + stripXmlDeclaration(rpc).substring(startTagMatcher.end());
+        return rpc.startsWith("<?xml") ? NetconfConstants.XML_VERSION + updatedRpc : updatedRpc;
+    }
+
+    private String getMissingRpcAttributes(String existingAttributes) {
+        StringBuilder attributes = new StringBuilder();
+        boolean hasDefaultNamespace = hasAttribute(existingAttributes, "xmlns");
+        for (Map.Entry<String, String> attribute : rpcAttrMap.entrySet()) {
+            if (!hasAttribute(existingAttributes, attribute.getKey())) {
+                attributes.append(" ")
+                    .append(attribute.getKey())
+                    .append("=\"")
+                    .append(attribute.getValue())
+                    .append("\"");
+            }
+            if ("xmlns".equals(attribute.getKey())) {
+                hasDefaultNamespace = true;
+            }
+        }
+        if (!hasDefaultNamespace) {
+            attributes.append(" xmlns=\"").append(NetconfConstants.URN_XML_NS_NETCONF_BASE_1_0).append("\"");
+        }
+        return attributes.toString();
+    }
+
+    private boolean hasAttribute(String existingAttributes, String attributeName) {
+        return Pattern.compile("(^|\\s)" + Pattern.quote(attributeName) + "\\s*=")
+            .matcher(existingAttributes)
+            .find();
+    }
+
+    private void validateReplyMessageId(String expectedMessageId, String reply) throws IOException {
+        if (expectedMessageId == null || !isRpcReply(reply.trim())) {
+            return;
+        }
+        try {
+            RpcReply rpcReply = RpcReply.from(reply);
+            String actualMessageId = rpcReply.getMessageId();
+            if (actualMessageId != null && !expectedMessageId.equals(actualMessageId)) {
+                throw new NetconfException(
+                    "Mismatched rpc-reply message-id. expected=" + expectedMessageId + ", actual=" + actualMessageId);
+            }
+        } catch (ParserConfigurationException | SAXException | XPathExpressionException e) {
+            throw new NetconfException("Invalid <rpc-reply> message from server: " + reply, e);
+        }
+    }
+
+    private byte[] applyTransportFraming(String rpc) {
+        if (!useChunkedFraming) {
+            return (rpc + NetconfConstants.DEVICE_PROMPT).getBytes(StandardCharsets.UTF_8);
+        }
+        int payloadLength = rpc.getBytes(StandardCharsets.UTF_8).length;
+        String chunkedRpc = "\n#" + payloadLength + "\n" + rpc + "\n##\n";
+        return chunkedRpc.getBytes(StandardCharsets.UTF_8);
+    }
+
+    private boolean startsWithChunkedFraming() throws IOException {
+        int nextByte = peekIncomingByte();
+        return nextByte == '\n' || nextByte == '#';
+    }
+
+    private int peekIncomingByte() throws IOException {
+        int nextByte = readIncomingByte();
+        if (nextByte >= 0) {
+            pushBackBytes(new byte[] {(byte) nextByte});
+        }
+        return nextByte;
+    }
+
+    private int readIncomingBytes(byte[] buffer) throws IOException {
+        if (unreadBytes.length > 0) {
+            int bytesToCopy = Math.min(buffer.length, unreadBytes.length);
+            System.arraycopy(unreadBytes, 0, buffer, 0, bytesToCopy);
+            unreadBytes = Arrays.copyOfRange(unreadBytes, bytesToCopy, unreadBytes.length);
+            return bytesToCopy;
+        }
+        return stdInStreamFromDevice.read(buffer, 0, buffer.length);
+    }
+
+    private int readIncomingByte() throws IOException {
+        if (unreadBytes.length > 0) {
+            int nextByte = unreadBytes[0] & 0xFF;
+            unreadBytes = Arrays.copyOfRange(unreadBytes, 1, unreadBytes.length);
+            return nextByte;
+        }
+        return stdInStreamFromDevice.read();
+    }
+
+    private void pushBackBytes(byte[] bytes) {
+        if (bytes.length == 0) {
+            return;
+        }
+        byte[] combined = new byte[bytes.length + unreadBytes.length];
+        System.arraycopy(bytes, 0, combined, 0, bytes.length);
+        System.arraycopy(unreadBytes, 0, combined, bytes.length, unreadBytes.length);
+        unreadBytes = combined;
+    }
+
+    private String readChunkHeaderLine(long startTime) throws IOException {
+        ByteArrayOutputStream lineBuffer = new ByteArrayOutputStream();
+        while (!commandTimedOut(startTime)) {
+            int nextByte = readIncomingByte();
+            if (nextByte < 0) {
+                throw new NetconfException("Input Stream has been closed during reading.");
+            }
+            if (nextByte == '\n') {
+                return lineBuffer.toString(StandardCharsets.UTF_8);
+            }
+            if (nextByte != '\r') {
+                lineBuffer.write(nextByte);
+            }
+        }
+        throw new SocketTimeoutException("Command timeout limit was exceeded: " + commandTimeout);
+    }
+
+    private byte[] readExactBytes(int expectedLength, long startTime) throws IOException {
+        byte[] chunkBytes = new byte[expectedLength];
+        int offset = 0;
+        while (offset < expectedLength && !commandTimedOut(startTime)) {
+            int bytesRead;
+            if (unreadBytes.length > 0) {
+                bytesRead = Math.min(expectedLength - offset, unreadBytes.length);
+                System.arraycopy(unreadBytes, 0, chunkBytes, offset, bytesRead);
+                unreadBytes = Arrays.copyOfRange(unreadBytes, bytesRead, unreadBytes.length);
+            } else {
+                bytesRead = stdInStreamFromDevice.read(chunkBytes, offset, expectedLength - offset);
+            }
+            if (bytesRead < 0) {
+                throw new NetconfException("Input Stream has been closed during reading.");
+            }
+            offset += bytesRead;
+        }
+        if (offset < expectedLength) {
+            throw new SocketTimeoutException("Command timeout limit was exceeded: " + commandTimeout);
+        }
+        return chunkBytes;
+    }
+
+    private boolean commandTimedOut(long startTime) {
+        return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startTime) >= commandTimeout;
+    }
+
+    private abstract class RpcReplyInputStream extends InputStream {
+
+        private final long startTime = System.nanoTime();
+        private boolean finished;
+        private boolean closed;
+
+        @Override
+        public int read() throws IOException {
+            if (closed) {
+                throw new IOException("Stream closed");
+            }
+            if (finished) {
+                return -1;
+            }
+            int nextByte = readPayloadByte();
+            if (nextByte < 0) {
+                finished = true;
+            }
+            return nextByte;
+        }
+
+        @Override
+        public int read(byte[] buffer, int off, int len) throws IOException {
+            if (buffer == null) {
+                throw new NullPointerException("buffer");
+            }
+            if (off < 0 || len < 0 || len > buffer.length - off) {
+                throw new IndexOutOfBoundsException();
+            }
+            if (len == 0) {
+                return 0;
+            }
+            int firstByte = read();
+            if (firstByte < 0) {
+                return -1;
+            }
+            buffer[off] = (byte) firstByte;
+            int bytesRead = 1;
+            while (bytesRead < len) {
+                int nextByte = read();
+                if (nextByte < 0) {
+                    break;
+                }
+                buffer[off + bytesRead] = (byte) nextByte;
+                bytesRead++;
+            }
+            return bytesRead;
+        }
+
+        @Override
+        public void close() throws IOException {
+            if (closed) {
+                return;
+            }
+            try {
+                byte[] discardBuffer = new byte[BUFFER_SIZE];
+                while (read(discardBuffer, 0, discardBuffer.length) != -1) {
+                    // Drain the current reply so the session stays aligned for the next RPC.
+                }
+            } finally {
+                finished = true;
+                closed = true;
+            }
+        }
+
+        protected abstract int readPayloadByte() throws IOException;
+
+        protected final int readIncomingByteOrThrow() throws IOException {
+            if (commandTimedOut(startTime)) {
+                throw new SocketTimeoutException("Command timeout limit was exceeded: " + commandTimeout);
+            }
+            int nextByte = readIncomingByte();
+            if (nextByte < 0) {
+                throw new NetconfException("Input Stream has been closed during reading.");
+            }
+            return nextByte;
+        }
+
+        protected final String readChunkHeaderLine() throws IOException {
+            return NetconfSession.this.readChunkHeaderLine(startTime);
+        }
+    }
+
+    private final class LegacyRpcReplyInputStream extends RpcReplyInputStream {
+
+        private final byte[] candidatePrompt = new byte[DEVICE_PROMPT_BYTES.length];
+        private int candidateLength;
+
+        @Override
+        protected int readPayloadByte() throws IOException {
+            while (true) {
+                if (candidateLength > 0 && !matchesPromptPrefix()) {
+                    return shiftCandidateByte();
+                }
+                if (candidateLength == DEVICE_PROMPT_BYTES.length) {
+                    candidateLength = 0;
+                    return -1;
+                }
+                candidatePrompt[candidateLength++] = (byte) readIncomingByteOrThrow();
+            }
+        }
+
+        private boolean matchesPromptPrefix() {
+            for (int i = 0; i < candidateLength; i++) {
+                if (candidatePrompt[i] != DEVICE_PROMPT_BYTES[i]) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        private int shiftCandidateByte() {
+            int nextByte = candidatePrompt[0] & 0xFF;
+            if (candidateLength > 1) {
+                System.arraycopy(candidatePrompt, 1, candidatePrompt, 0, candidateLength - 1);
+            }
+            candidateLength--;
+            return nextByte;
+        }
+    }
+
+    private final class ChunkedRpcReplyInputStream extends RpcReplyInputStream {
+
+        private int remainingChunkBytes;
+
+        @Override
+        protected int readPayloadByte() throws IOException {
+            while (remainingChunkBytes == 0) {
+                String header = readChunkHeaderLine();
+                if (header.isEmpty()) {
+                    continue;
+                }
+                if ("##".equals(header)) {
+                    return -1;
+                }
+                if (!header.startsWith("#")) {
+                    throw new NetconfException("Invalid NETCONF chunked framing header: " + header);
+                }
+                try {
+                    remainingChunkBytes = Integer.parseInt(header.substring(1));
+                } catch (NumberFormatException e) {
+                    throw new NetconfException("Invalid NETCONF chunk size: " + header, e);
+                }
+                if (remainingChunkBytes < 0) {
+                    throw new NetconfException("Invalid NETCONF chunk size: " + header);
+                }
+            }
+            remainingChunkBytes--;
+            return readIncomingByteOrThrow();
+        }
+    }
+
+    private static int indexOf(byte[] haystack, byte[] needle) {
+        outer:
+        for (int i = 0; i <= haystack.length - needle.length; i++) {
+            for (int j = 0; j < needle.length; j++) {
+                if (haystack[i + j] != needle[j]) {
+                    continue outer;
+                }
+            }
+            return i;
+        }
+        return -1;
     }
 }
