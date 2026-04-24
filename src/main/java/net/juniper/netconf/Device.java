@@ -19,7 +19,10 @@ import org.slf4j.LoggerFactory;
 import org.w3c.dom.Document;
 import org.xml.sax.SAXException;
 
+import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.parsers.ParserConfigurationException;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
@@ -361,8 +364,8 @@ public class Device implements AutoCloseable {
         this.netconfCapabilities = b.netconfCapabilities;
 
         try {
-            this.xmlBuilder = javax.xml.parsers.DocumentBuilderFactory.newInstance().newDocumentBuilder();
-        } catch (javax.xml.parsers.ParserConfigurationException e) {
+            this.xmlBuilder = createSecureDocumentBuilder();
+        } catch (ParserConfigurationException e) {
             throw new NetconfException("Cannot create XML Parser", e);
         }
 
@@ -490,6 +493,20 @@ public class Device implements AutoCloseable {
         } catch (JSchException e) {
             throw new NetconfException(String.format("Error parsing the pemKeyFile: %s", e.getMessage()), e);
         }
+    }
+
+    private static DocumentBuilder createSecureDocumentBuilder() throws ParserConfigurationException {
+        DocumentBuilderFactory documentBuilderFactory = DocumentBuilderFactory.newInstance();
+        documentBuilderFactory.setNamespaceAware(true);
+        documentBuilderFactory.setExpandEntityReferences(false);
+        documentBuilderFactory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+        documentBuilderFactory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+        documentBuilderFactory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+        documentBuilderFactory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+        documentBuilderFactory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+        documentBuilderFactory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "");
+        documentBuilderFactory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
+        return documentBuilderFactory.newDocumentBuilder();
     }
 
     /**

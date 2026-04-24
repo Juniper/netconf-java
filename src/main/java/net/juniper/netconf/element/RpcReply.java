@@ -333,6 +333,9 @@ public class RpcReply extends AbstractNetconfElement {
         throws ParserConfigurationException, IOException, SAXException, XPathExpressionException {
 
         String cleaned = stripEomDelimiter(xml);
+        if (cleaned.contains("<!DOCTYPE")) {
+            throw new IllegalArgumentException("DOCTYPE declarations are not allowed in NETCONF messages (RFC 6241 §3.2)");
+        }
         final Document document = createDocumentBuilderFactory().newDocumentBuilder()
             .parse(new InputSource(new StringReader(cleaned)));
         final XPath xPath = XPathFactory.newInstance().newXPath();
