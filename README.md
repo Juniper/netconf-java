@@ -52,6 +52,17 @@ User may download the source code and compile it with desired JDK version.
   
 =======
 
+v2.2.1
+------
+* Hardened NETCONF XML parsing against XXE and DTD-based attacks
+* Fixed NETCONF RPC framing and `message-id` reply correlation for sequential session reuse
+* Improved SSH/NETCONF session cleanup on failed connection or session initialization
+* Fixed shell exec helpers so commands are set, channels are connected, and timeout/cleanup behavior is more predictable
+* Fixed nested XML path construction in the XML helper
+* Documented `NetconfSession` as a sequential request/response channel rather than a concurrent in-flight RPC transport
+* Added [`docs/compatibility.md`](docs/compatibility.md) with current RFC, capability, NMDA, and extension support details
+* Upgraded `assertj-core` to `3.27.7` to address `CVE-2026-24400`
+
 v2.2.0
 ------
 * Java 17 baseline; compiled with `--release 17`
