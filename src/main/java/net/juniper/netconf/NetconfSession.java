@@ -58,6 +58,12 @@ import java.util.regex.Pattern;
  *       {@link #commitConfirm(long, String)}, {@link #cancelCommit(String)}).</li>
  *   <li>Call {@link #close()} when finished to free resources.</li>
  * </ol>
+ * <p>
+ * A {@code NetconfSession} should be treated as a single-threaded conversation
+ * with the server. The library supports sequential reuse of one session across
+ * multiple RPCs, but does not guarantee safety for multiple concurrent
+ * in-flight RPCs on the same session. Use separate NETCONF sessions when
+ * application-level concurrency is required.
  */
 public class NetconfSession {
 
