@@ -104,17 +104,31 @@ public class NetconfSession {
     private static final Pattern XML_DECLARATION_PATTERN =
         Pattern.compile("^<\\?xml[^>]*\\?>\\s*", Pattern.DOTALL);
 
+    private final List<String> clientCapabilities;
     private boolean useChunkedFraming;
+    private NegotiatedCapabilities negotiatedCapabilities;
     private byte[] unreadBytes = new byte[0];
 
     private record PreparedRpc(String xml, String messageId) { }
 
     NetconfSession(Channel netconfChannel, int timeout, String hello,
                    DocumentBuilder builder) throws IOException {
-        this(netconfChannel, timeout, timeout, hello, builder);
+        this(netconfChannel, timeout, timeout, defaultClientCapabilities(), hello, builder);
     }
 
     NetconfSession(Channel netconfChannel, int connectionTimeout, int commandTimeout,
+                   String hello,
+                   DocumentBuilder builder) throws IOException {
+        this(netconfChannel, connectionTimeout, commandTimeout, defaultClientCapabilities(), hello, builder);
+    }
+
+    NetconfSession(Channel netconfChannel, int timeout, List<String> clientCapabilities,
+                   String hello, DocumentBuilder builder) throws IOException {
+        this(netconfChannel, timeout, timeout, clientCapabilities, hello, builder);
+    }
+
+    NetconfSession(Channel netconfChannel, int connectionTimeout, int commandTimeout,
+                   List<String> clientCapabilities,
                    String hello,
                    DocumentBuilder builder) throws IOException {
 
@@ -129,8 +143,16 @@ public class NetconfSession {
         this.netconfChannel = netconfChannel;
         this.commandTimeout = commandTimeout;
         this.builder = builder;
+        this.clientCapabilities = clientCapabilities == null ? List.of() : List.copyOf(clientCapabilities);
 
         sendHello(hello);
+    }
+
+    private static List<String> defaultClientCapabilities() {
+        return List.of(
+            NetconfConstants.URN_IETF_PARAMS_NETCONF_BASE_1_0,
+            NetconfConstants.URN_IETF_PARAMS_NETCONF_BASE_1_1
+        );
     }
 
     private XML convertToXML(String xml) throws SAXException, IOException {
@@ -150,7 +172,7 @@ public class NetconfSession {
     String getRpcReply(String rpc) throws IOException {
         PreparedRpc preparedRpc = sendRpcRequest(rpc);
         String reply;
-        if (startsWithChunkedFraming()) {
+        if (useChunkedFraming) {
             reply = readChunkedRpcReply();
         } else {
             reply = readLegacyRpcReply();
@@ -290,6 +312,7 @@ public class NetconfSession {
      * @throws java.io.IOException      If there are issues reading the config file.
      */
     public void loadXMLConfiguration(String configuration, String loadType) throws IOException, SAXException {
+        requireCandidateCapability("loadXMLConfiguration");
         validateLoadType(loadType);
         configuration = configuration.trim();
         if (!configuration.startsWith("<configuration")) {
@@ -318,7 +341,10 @@ public class NetconfSession {
         }
 
         if (hasError() || !isOK()) {
-            throw new LoadException("Load operation returned error.");
+            throw new LoadException(
+                RpcErrorException.buildMessage("Load operation", lastRpcReplyObject),
+                lastRpcReplyObject
+            );
         }
     }
 
@@ -327,7 +353,9 @@ public class NetconfSession {
         this.lastRpcReply = reply;
         try {
             this.serverHello = Hello.from(reply);
-            this.useChunkedFraming = serverHello.hasCapability(NetconfConstants.URN_IETF_PARAMS_NETCONF_BASE_1_1);
+            this.negotiatedCapabilities =
+                NegotiatedCapabilities.fromCapabilities(clientCapabilities, serverHello.getCapabilities());
+            this.useChunkedFraming = negotiatedCapabilities.usesChunkedFraming();
         } catch (final ParserConfigurationException | SAXException | XPathExpressionException e) {
             throw new NetconfException("Invalid <hello> message from server: " + reply, e);
         }
@@ -358,6 +386,7 @@ public class NetconfSession {
      * @throws java.io.IOException      If there are issues reading the config file.
      */
     public void loadTextConfiguration(String configuration, String loadType) throws IOException, SAXException {
+        requireCandidateCapability("loadTextConfiguration");
         String rpc = "<rpc>" +
                 "<edit-config>" +
                 "<target>" +
@@ -381,11 +410,15 @@ public class NetconfSession {
         }
 
         if (hasError() || !isOK()) {
-            throw new LoadException("Load operation returned error");
+            throw new LoadException(
+                RpcErrorException.buildMessage("Load operation", lastRpcReplyObject),
+                lastRpcReplyObject
+            );
         }
     }
 
     private String getConfig(String configTree) throws IOException {
+        requireCandidateCapability("getCandidateConfig");
 
         String rpc = "<rpc>" +
                 "<get-config>" +
@@ -487,17 +520,26 @@ public class NetconfSession {
     }
 
     /**
+     * Returns the negotiated capability view for this session.
+     *
+     * @return immutable capability snapshot
+     */
+    public NegotiatedCapabilities getNegotiatedCapabilities() {
+        return negotiatedCapabilities;
+    }
+
+    /**
      * Sends a raw RPC string, waits for the {@code &lt;rpc-reply&gt;}, and converts the
      * response to an {@link XML} object.
      * <p>
      * If the server includes any {@code &lt;rpc-error&gt;} elements, the call
-     * now throws a {@link NetconfException}.  This makes error handling
+     * throws a {@link RpcErrorException}. This makes error handling
      * symmetrical with other high‑level helpers (e.g.&nbsp;{@code load*()},
      * {@code commit()}).
      *
      * @param rpcContent the RPC payload (with or without &lt;rpc&gt; wrapper)
      * @return parsed {@link XML} representation of the reply
-     * @throws NetconfException        if the reply contains one or more
+     * @throws RpcErrorException       if the reply contains one or more
      *                                 {@code &lt;rpc-error&gt;} elements
      * @throws SAXException            if the reply cannot be parsed as XML
      * @throws IOException             on transport errors
@@ -507,7 +549,10 @@ public class NetconfSession {
         setLastRpcReply(rpcReply);
 
         if (hasError()) {
-            throw new NetconfException("RPC returned error: " + rpcReply);
+            throw new RpcErrorException(
+                RpcErrorException.buildMessage("RPC execution", lastRpcReplyObject),
+                lastRpcReplyObject
+            );
         }
         return convertToXML(rpcReply);
     }
@@ -677,6 +722,7 @@ public class NetconfSession {
      * @throws java.io.IOException      If there are issues communicating with the netconf server.
      */
     public boolean lockConfig() throws IOException, SAXException {
+        requireCandidateCapability("lockConfig");
         String rpc = "<rpc>" +
                 "<lock>" +
                 "<target>" +
@@ -696,6 +742,7 @@ public class NetconfSession {
      * @throws java.io.IOException      If there are issues communicating with the netconf server.
      */
     public boolean unlockConfig() throws IOException {
+        requireCandidateCapability("unlockConfig");
         String rpc = "<rpc>" +
                 "<unlock>" +
                 "<target>" +
@@ -749,6 +796,7 @@ public class NetconfSession {
      * @throws java.io.IOException      If there are issues reading the config file.
      */
     public void loadSetConfiguration(String configuration) throws IOException {
+        requireCandidateCapability("loadSetConfiguration");
         String rpc = "<rpc>" +
                 "<load-configuration action=\"set\">" +
                 "<configuration-set>" +
@@ -757,8 +805,12 @@ public class NetconfSession {
                 "</load-configuration>" +
                 "</rpc>";
         setLastRpcReply(getRpcReply(rpc));
-        if (hasError() || !isOK())
-            throw new LoadException("Load operation returned error");
+        if (hasError() || !isOK()) {
+            throw new LoadException(
+                RpcErrorException.buildMessage("Load operation", lastRpcReplyObject),
+                lastRpcReplyObject
+            );
+        }
     }
 
     /**
@@ -772,6 +824,7 @@ public class NetconfSession {
      * @throws java.io.IOException      If there are issues reading the config file.
      */
     public void loadXMLFile(String configFile, String loadType) throws IOException, SAXException {
+        requireCandidateCapability("loadXMLFile");
         validateLoadType(loadType);
         loadXMLConfiguration(readConfigFile(configFile), loadType);
     }
@@ -816,6 +869,7 @@ public class NetconfSession {
      * @throws java.io.IOException      If there are issues reading the config file.
      */
     public void loadTextFile(String configFile, String loadType) throws IOException, SAXException {
+        requireCandidateCapability("loadTextFile");
         validateLoadType(loadType);
         loadTextConfiguration(readConfigFile(configFile), loadType);
     }
@@ -831,6 +885,7 @@ public class NetconfSession {
      */
     public void loadSetFile(String configFile) throws
             IOException {
+        requireCandidateCapability("loadSetFile");
         loadSetConfiguration(readConfigFile(configFile));
     }
 
@@ -860,6 +915,7 @@ public class NetconfSession {
      * @throws org.xml.sax.SAXException if there are errors parsing the XML reply.
      */
     public void commitThisConfiguration(String configFile, String loadType) throws IOException, SAXException {
+        requireCandidateCapability("commitThisConfiguration");
         String configuration = readConfigFile(configFile);
         configuration = configuration.trim();
         if (!this.lockConfig()) {
@@ -899,13 +955,18 @@ public class NetconfSession {
      * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
      */
     public void commit() throws IOException, SAXException {
+        requireCandidateCapability("commit");
         String rpc = "<rpc>" +
                 "<commit/>" +
                 "</rpc>" +
                 NetconfConstants.DEVICE_PROMPT;
         setLastRpcReply(getRpcReply(rpc));
-        if (hasError() || !isOK())
-            throw new CommitException("Commit operation returned error.");
+        if (hasError() || !isOK()) {
+            throw new CommitException(
+                RpcErrorException.buildMessage("Commit operation", lastRpcReplyObject),
+                lastRpcReplyObject
+            );
+        }
     }
 
     /**
@@ -945,6 +1006,8 @@ public class NetconfSession {
      * @throws IOException   if communication with the device fails
      */
     public void commitConfirm(long seconds, String persistToken) throws IOException {
+        requireCandidateCapability("commitConfirm");
+        requireConfirmedCommitCapability("commitConfirm", persistToken != null);
         StringBuilder rpc = new StringBuilder();
         rpc.append("<rpc><commit><confirmed/>");
         if (seconds > 0) {
@@ -957,7 +1020,10 @@ public class NetconfSession {
 
         setLastRpcReply(getRpcReply(rpc.toString()));
         if (hasError() || !isOK()) {
-            throw new CommitException("Confirmed-commit operation returned error.");
+            throw new CommitException(
+                RpcErrorException.buildMessage("Confirmed-commit operation", lastRpcReplyObject),
+                lastRpcReplyObject
+            );
         }
     }
 
@@ -972,6 +1038,8 @@ public class NetconfSession {
      * @throws SAXException if the reply cannot be parsed
      */
     public boolean cancelCommit(String persistId) throws IOException, SAXException {
+        requireCandidateCapability("cancelCommit");
+        requireConfirmedCommitCapability("cancelCommit", persistId != null);
         StringBuilder rpc = new StringBuilder();
         rpc.append("<rpc><cancel-commit/>");
         if (persistId != null) {
@@ -991,6 +1059,7 @@ public class NetconfSession {
      * @throws java.io.IOException                 If there are errors communicating with the netconf server.
      */
     public void commitFull() throws CommitException, IOException {
+        requireCandidateCapability("commitFull");
         String rpc = "<rpc>" +
                 "<commit-configuration>" +
                 "<full/>" +
@@ -998,8 +1067,12 @@ public class NetconfSession {
                 "</rpc>" +
                 NetconfConstants.DEVICE_PROMPT;
         setLastRpcReply(getRpcReply(rpc));
-        if (hasError() || !isOK())
-            throw new CommitException("Commit operation returned error.");
+        if (hasError() || !isOK()) {
+            throw new CommitException(
+                RpcErrorException.buildMessage("Commit operation", lastRpcReplyObject),
+                lastRpcReplyObject
+            );
+        }
     }
 
 
@@ -1058,10 +1131,16 @@ public class NetconfSession {
     /**
      * Validate the candidate configuration.
      *
-     * @return true if validation successful.
+     * @return {@code true} if validation completed with a clean {@code <ok/>}
+     *         reply; {@code false} for warning-only or other non-error
+     *         non-{@code <ok/>} replies
      * @throws java.io.IOException      If there are errors communicating with the netconf server.
+     * @throws ValidateException        if the server returns one or more
+     *                                  {@code <rpc-error>} elements
      */
     public boolean validate() throws IOException {
+        requireCandidateCapability("validate");
+        requireValidateCapability("validate");
 
         String rpc = "<rpc>" +
                 "<validate>" +
@@ -1072,7 +1151,13 @@ public class NetconfSession {
                 "</rpc>" +
                 NetconfConstants.DEVICE_PROMPT;
         setLastRpcReply(getRpcReply(rpc));
-        return !hasError() && isOK();
+        if (hasError()) {
+            throw new ValidateException(
+                RpcErrorException.buildMessage("Validate operation", lastRpcReplyObject),
+                lastRpcReplyObject
+            );
+        }
+        return isOK();
     }
 
     /**
@@ -1337,19 +1422,6 @@ public class NetconfSession {
         return chunkedRpc.getBytes(StandardCharsets.UTF_8);
     }
 
-    private boolean startsWithChunkedFraming() throws IOException {
-        int nextByte = peekIncomingByte();
-        return nextByte == '\n' || nextByte == '#';
-    }
-
-    private int peekIncomingByte() throws IOException {
-        int nextByte = readIncomingByte();
-        if (nextByte >= 0) {
-            pushBackBytes(new byte[] {(byte) nextByte});
-        }
-        return nextByte;
-    }
-
     private int readIncomingBytes(byte[] buffer) throws IOException {
         if (unreadBytes.length > 0) {
             int bytesToCopy = Math.min(buffer.length, unreadBytes.length);
@@ -1421,6 +1493,38 @@ public class NetconfSession {
 
     private boolean commandTimedOut(long startTime) {
         return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startTime) >= commandTimeout;
+    }
+
+    private NegotiatedCapabilities requireNegotiatedCapabilities() {
+        if (negotiatedCapabilities == null) {
+            throw new IllegalStateException("NETCONF session capabilities have not been negotiated");
+        }
+        return negotiatedCapabilities;
+    }
+
+    private void requireCandidateCapability(String operation) throws UnsupportedCapabilityException {
+        requireCapability(requireNegotiatedCapabilities().supportsCandidate(), "candidate", operation);
+    }
+
+    private void requireValidateCapability(String operation) throws UnsupportedCapabilityException {
+        requireCapability(requireNegotiatedCapabilities().supportsValidate(), "validate", operation);
+    }
+
+    private void requireConfirmedCommitCapability(String operation, boolean requiresPersistSupport)
+        throws UnsupportedCapabilityException {
+        NegotiatedCapabilities capabilities = requireNegotiatedCapabilities();
+        requireCapability(
+            requiresPersistSupport ? capabilities.supportsConfirmedCommit11() : capabilities.supportsConfirmedCommit(),
+            requiresPersistSupport ? "confirmed-commit:1.1" : "confirmed-commit",
+            operation
+        );
+    }
+
+    private void requireCapability(boolean supported, String capability, String operation)
+        throws UnsupportedCapabilityException {
+        if (!supported) {
+            throw new UnsupportedCapabilityException(operation, capability);
+        }
     }
 
     private abstract class RpcReplyInputStream extends InputStream {

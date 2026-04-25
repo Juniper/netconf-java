@@ -3,11 +3,14 @@
 # run-integration-tests.sh
 # Script to run netconf-java integration tests with interactive credential prompts
 
-set -e
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../../../../../.." && pwd)"
 
 echo "=== NetConf Java Integration Test Runner ==="
 echo "This script will run integration tests against a real network device."
-echo "You will be prompted for connection details if not provided via environment."
+echo "You will be prompted for connection details if not provided via arguments or environment."
 echo ""
 
 # Check if Maven is available
@@ -17,7 +20,6 @@ if ! command -v mvn &> /dev/null; then
 fi
 
 # Parse command line arguments
-INTERACTIVE=true
 SKIP_COMPILE=false
 
 while [[ $# -gt 0 ]]; do
@@ -70,54 +72,42 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Set defaults from environment if not provided via command line
-NETCONF_HOST=${NETCONF_HOST:-$NETCONF_HOST}
-NETCONF_USERNAME=${NETCONF_USERNAME:-$NETCONF_USERNAME}
-NETCONF_PASSWORD=${NETCONF_PASSWORD:-$NETCONF_PASSWORD}
-NETCONF_PORT=${NETCONF_PORT:-830}
-NETCONF_TIMEOUT=${NETCONF_TIMEOUT:-30000}
+NETCONF_HOST="${NETCONF_HOST:-}"
+NETCONF_USERNAME="${NETCONF_USERNAME:-}"
+NETCONF_PASSWORD="${NETCONF_PASSWORD:-}"
+NETCONF_PORT="${NETCONF_PORT:-830}"
+NETCONF_TIMEOUT="${NETCONF_TIMEOUT:-30000}"
+export NETCONF_HOST NETCONF_USERNAME NETCONF_PASSWORD NETCONF_PORT NETCONF_TIMEOUT
 
 # Compile the project first (unless skipped)
 if [ "$SKIP_COMPILE" = false ]; then
     echo "Compiling project..."
-    mvn compile test-compile -q
-    if [ $? -ne 0 ]; then
-        echo "Error: Failed to compile project"
-        exit 1
-    fi
+    (
+        cd "$REPO_ROOT"
+        mvn compile test-compile -q
+    )
     echo "✓ Project compiled successfully"
     echo ""
 fi
 
 # Build Maven command
-MVN_CMD="mvn test -Dtest=NetconfIntegrationTest -Dnetconf.integration.enabled=true"
-
-# Add system properties if provided
-if [ -n "$NETCONF_HOST" ]; then
-    MVN_CMD="$MVN_CMD -Dnetconf.host=$NETCONF_HOST"
-fi
-
-if [ -n "$NETCONF_USERNAME" ]; then
-    MVN_CMD="$MVN_CMD -Dnetconf.username=$NETCONF_USERNAME"
-fi
-
-if [ -n "$NETCONF_PASSWORD" ]; then
-    MVN_CMD="$MVN_CMD -Dnetconf.password=$NETCONF_PASSWORD"
-fi
-
-if [ -n "$NETCONF_PORT" ]; then
-    MVN_CMD="$MVN_CMD -Dnetconf.port=$NETCONF_PORT"
-fi
-
-if [ -n "$NETCONF_TIMEOUT" ]; then
-    MVN_CMD="$MVN_CMD -Dnetconf.timeout=$NETCONF_TIMEOUT"
-fi
+MVN_CMD=(
+    mvn
+    test
+    "-Dtest=NetconfIntegrationTest"
+    "-Dnetconf.integration.enabled=true"
+)
 
 echo "Running integration tests..."
-echo "Command: $MVN_CMD"
+echo "Connection settings are passed via NETCONF_* environment variables."
+echo "Command: mvn test -Dtest=NetconfIntegrationTest -Dnetconf.integration.enabled=true"
 echo ""
 
 # Execute the tests
-eval $MVN_CMD
+(
+    cd "$REPO_ROOT"
+    "${MVN_CMD[@]}"
+)
 
 echo ""
 echo "=== Integration Tests Complete ==="

@@ -384,6 +384,89 @@ public class DeviceTest {
             .areIdentical();
     }
 
+    @Test
+    public void GIVEN_connectedDevice_WHEN_getNegotiatedCapabilities_THEN_returnSessionCapabilityView() throws Exception {
+        Device device = Device.builder()
+            .sshClient(givenConnectingSshClient())
+            .hostName(TEST_HOSTNAME)
+            .userName(TEST_USERNAME)
+            .password(TEST_PASSWORD)
+            .strictHostKeyChecking(false)
+            .build();
+
+        device.connect();
+
+        NegotiatedCapabilities capabilities = device.getNegotiatedCapabilities();
+
+        assertThat(capabilities.getBaseVersion()).isEqualTo(NegotiatedCapabilities.BaseVersion.NETCONF_1_1);
+        assertThat(capabilities.usesChunkedFraming()).isTrue();
+        assertThat(capabilities.getServerCapabilities())
+            .contains(NetconfConstants.URN_IETF_PARAMS_NETCONF_BASE_1_0,
+                NetconfConstants.URN_IETF_PARAMS_NETCONF_BASE_1_1);
+    }
+
+    @Test
+    public void GIVEN_noSharedBaseCapability_WHEN_connect_THEN_disconnectChannelAndSession() throws Exception {
+        JSch sshClient = mock(JSch.class);
+        Session session = mock(Session.class);
+        HostKeyRepository hostKeyRepository = mock(HostKeyRepository.class);
+        ChannelSubsystem channel = mock(ChannelSubsystem.class);
+        AtomicBoolean sessionConnected = new AtomicBoolean(false);
+        AtomicBoolean channelConnected = new AtomicBoolean(false);
+
+        when(session.isConnected()).thenAnswer(invocation -> sessionConnected.get());
+        doAnswer(invocation -> {
+            sessionConnected.set(true);
+            return null;
+        }).when(session).connect(eq(DEFAULT_TIMEOUT));
+        doAnswer(invocation -> {
+            sessionConnected.set(false);
+            return null;
+        }).when(session).disconnect();
+
+        when(channel.isConnected()).thenAnswer(invocation -> channelConnected.get());
+        when(channel.getInputStream()).thenReturn(new ByteArrayInputStream(
+            ("""
+                <hello xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+                  <capabilities>
+                    <capability>urn:ietf:params:netconf:base:1.0</capability>
+                  </capabilities>
+                  <session-id>27700</session-id>
+                </hello>""" + NetconfConstants.DEVICE_PROMPT).getBytes(StandardCharsets.UTF_8)));
+        when(channel.getOutputStream()).thenReturn(outputStream);
+        doAnswer(invocation -> {
+            channelConnected.set(true);
+            return null;
+        }).when(channel).connect(eq(DEFAULT_TIMEOUT));
+        doAnswer(invocation -> {
+            channelConnected.set(false);
+            return null;
+        }).when(channel).disconnect();
+
+        when(session.openChannel(eq(SUBSYSTEM))).thenReturn(channel);
+        when(sshClient.getSession(eq(TEST_USERNAME), eq(TEST_HOSTNAME), eq(DEFAULT_NETCONF_PORT))).thenReturn(session);
+        when(sshClient.getHostKeyRepository()).thenReturn(hostKeyRepository);
+
+        Device device = Device.builder()
+            .sshClient(sshClient)
+            .hostName(TEST_HOSTNAME)
+            .userName(TEST_USERNAME)
+            .password(TEST_PASSWORD)
+            .netconfCapabilities(Collections.singletonList(NetconfConstants.URN_IETF_PARAMS_NETCONF_BASE_1_1))
+            .strictHostKeyChecking(false)
+            .build();
+
+        assertThatThrownBy(device::connect)
+            .isInstanceOf(NetconfException.class)
+            .hasMessageContaining("do not share a common NETCONF base capability");
+
+        verify(channel).disconnect();
+        verify(session).disconnect();
+        assertThat(sessionConnected.get()).isFalse();
+        assertThat(channelConnected.get()).isFalse();
+        assertThat(device.isConnected()).isFalse();
+    }
+
     private JSch givenConnectingSshClient() throws IOException, JSchException {
         final Session sshSession = mock(Session.class);
         when(sshSession.isConnected())
@@ -392,7 +475,7 @@ public class DeviceTest {
         when(sshChannel.getOutputStream())
             .thenReturn(outputStream);
         final ByteArrayInputStream is = new ByteArrayInputStream(
-            ("<hello/>" + NetconfConstants.DEVICE_PROMPT)
+            (HELLO_WITH_BASE_CAPABILITIES + NetconfConstants.DEVICE_PROMPT)
                 .getBytes(StandardCharsets.UTF_8));
         when(sshChannel.getInputStream())
             .thenReturn(is);

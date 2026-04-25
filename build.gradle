@@ -50,6 +50,73 @@ test {
     }
 }
 
+def netconfPropertySpecs = [
+    [name: 'netconf.host', env: 'NETCONF_HOST', required: true],
+    [name: 'netconf.username', env: 'NETCONF_USERNAME', required: true],
+    [name: 'netconf.password', env: 'NETCONF_PASSWORD', required: true],
+    [name: 'netconf.port', env: 'NETCONF_PORT', required: false, defaultValue: '830'],
+    [name: 'netconf.timeout', env: 'NETCONF_TIMEOUT', required: false, defaultValue: '30000']
+]
+
+def resolveNetconfProperty = { Map spec ->
+    if (project.hasProperty(spec.name)) {
+        return project.property(spec.name).toString()
+    }
+    if (System.getProperty(spec.name) != null) {
+        return System.getProperty(spec.name)
+    }
+    if (System.getenv(spec.env) != null) {
+        return System.getenv(spec.env)
+    }
+    return spec.defaultValue
+}
+
+tasks.register('integrationTest', org.gradle.api.tasks.testing.Test) {
+    description = 'Runs live NETCONF integration tests against a configured endpoint.'
+    group = 'verification'
+    useJUnitPlatform()
+    shouldRunAfter test
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+
+    filter {
+        includeTestsMatching 'net.juniper.netconf.integration.NetconfIntegrationTest'
+    }
+
+    testLogging {
+        events "passed", "skipped", "failed"
+    }
+
+    doFirst {
+        def resolvedProperties = [:]
+        def missingRequiredProperties = []
+
+        netconfPropertySpecs.each { spec ->
+            def value = resolveNetconfProperty(spec)
+            if (value == null || value.toString().trim().isEmpty()) {
+                if (spec.required) {
+                    missingRequiredProperties << "${spec.name} (${spec.env})"
+                }
+                return
+            }
+            resolvedProperties[spec.name] = value.toString()
+        }
+
+        if (!missingRequiredProperties.isEmpty()) {
+            throw new org.gradle.api.GradleException(
+                "integrationTest requires live NETCONF connection details. " +
+                "Provide ${missingRequiredProperties.join(', ')} via -Dnetconf.* " +
+                "or NETCONF_* environment variables."
+            )
+        }
+
+        systemProperty 'netconf.integration.enabled', 'true'
+        resolvedProperties.each { propertyName, propertyValue ->
+            systemProperty propertyName, propertyValue
+        }
+    }
+}
+
 tasks.withType(JavaCompile).configureEach {
     options.fork = true
     options.forkOptions.jvmArgs += [

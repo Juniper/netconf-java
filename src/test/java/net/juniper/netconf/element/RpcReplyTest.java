@@ -42,6 +42,22 @@ public class RpcReplyTest {
         "        <error-message>Invalid IP address for interface Ethernet1/0</error-message>\n" +
         "    </rpc-error>\n" +
         "</rpc-reply>";
+    private static final String RPC_REPLY_WITH_NESTED_COMMIT_RESULTS_ERRORS = """
+        <rpc-reply xmlns="urn:ietf:params:xml:ns:netconf:base:1.0" message-id="2">
+          <commit-results>
+            <rpc-error>
+              <error-type>protocol</error-type>
+              <error-tag>operation-failed</error-tag>
+              <error-severity>error</error-severity>
+              <error-message>Error while forking commitd process</error-message>
+            </rpc-error>
+            <rpc-error>
+              <error-severity>warning</error-severity>
+              <error-message>Could not extract delta, reading the entire configuration</error-message>
+            </rpc-error>
+          </commit-results>
+        </rpc-reply>
+        """;
 
     private static final String MALFORMED_RPC_REPLY = "<rpc-reply><unclosed></rpc-reply>";
 
@@ -127,6 +143,29 @@ public class RpcReplyTest {
                     .errorSeverity(RpcError.ErrorSeverity.ERROR)
                     .errorPath("/t:top/t:interface[t:name=\"Ethernet1/0\"]/t:address/t:name")
                     .errorMessage("Invalid IP address for interface Ethernet1/0")
+                    .build()));
+    }
+
+    @Test
+    public void willParseNestedCommitResultsErrors() throws Exception {
+        final RpcReply rpcReply = RpcReply.from(RPC_REPLY_WITH_NESTED_COMMIT_RESULTS_ERRORS);
+
+        assertThat(rpcReply.getMessageId()).isEqualTo("2");
+        assertThat(rpcReply.isOK()).isFalse();
+        assertThat(rpcReply.hasErrorsOrWarnings()).isTrue();
+        assertThat(rpcReply.hasErrors()).isTrue();
+        assertThat(rpcReply.hasWarnings()).isTrue();
+        assertThat(rpcReply.getErrors())
+            .isEqualTo(Arrays.asList(
+                RpcError.builder()
+                    .errorType(RpcError.ErrorType.PROTOCOL)
+                    .errorTag(RpcError.ErrorTag.OPERATION_FAILED)
+                    .errorSeverity(RpcError.ErrorSeverity.ERROR)
+                    .errorMessage("Error while forking commitd process")
+                    .build(),
+                RpcError.builder()
+                    .errorSeverity(RpcError.ErrorSeverity.WARNING)
+                    .errorMessage("Could not extract delta, reading the entire configuration")
                     .build()));
     }
 
