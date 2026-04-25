@@ -90,6 +90,7 @@ public class Device implements AutoCloseable {
 
     private final DocumentBuilder xmlBuilder;
     private final List<String> netconfCapabilities;
+    private final List<String> advertisedNetconfCapabilities;
     private final String helloRpc;
 
     private ChannelSubsystem sshChannel;
@@ -373,7 +374,9 @@ public class Device implements AutoCloseable {
             throw new NetconfException("Cannot create XML Parser", e);
         }
 
-        this.helloRpc = createHelloRPC(this.netconfCapabilities);
+        Hello hello = createHello(this.netconfCapabilities);
+        this.advertisedNetconfCapabilities = hello.getCapabilities();
+        this.helloRpc = createHelloRPC(hello);
     }
 
 
@@ -385,7 +388,7 @@ public class Device implements AutoCloseable {
      * @return List of default client capabilities.
      */
     protected List<String> getDefaultClientCapabilities() {
-        return DEFAULT_CLIENT_CAPABILITIES;
+        return createHello(DEFAULT_CLIENT_CAPABILITIES).getCapabilities();
     }
 
     /**
@@ -395,12 +398,14 @@ public class Device implements AutoCloseable {
      * @param capabilities A list of netconf capabilities
      * @return the hello RPC that represents those capabilities.
      */
-    private String createHelloRPC(List<String> capabilities) {
+    private Hello createHello(List<String> capabilities) {
         return Hello.builder()
             .capabilities(capabilities)
-            .build()
-            .getXml()
-            + NetconfConstants.DEVICE_PROMPT;
+            .build();
+    }
+
+    private String createHelloRPC(Hello hello) {
+        return hello.getXml() + NetconfConstants.DEVICE_PROMPT;
     }
 
     /**
@@ -450,7 +455,8 @@ public class Device implements AutoCloseable {
             channel = (ChannelSubsystem) session.openChannel("subsystem");
             channel.setSubsystem("netconf");
             NetconfSession establishedSession =
-                new NetconfSession(channel, connectionTimeout, commandTimeout, helloRpc, xmlBuilder);
+                new NetconfSession(channel, connectionTimeout, commandTimeout,
+                    advertisedNetconfCapabilities, helloRpc, xmlBuilder);
             sshSession = session;
             sshChannel = channel;
             return establishedSession;
@@ -881,6 +887,20 @@ public class Device implements AutoCloseable {
     }
 
     /**
+     * Returns the negotiated capability view for the active NETCONF session.
+     *
+     * @return immutable capability snapshot
+     * @throws IllegalStateException if the connection is not established
+     */
+    public NegotiatedCapabilities getNegotiatedCapabilities() {
+        if (netconfSession == null) {
+            throw new IllegalStateException("Cannot get negotiated capabilities, you need "
+                + "to establish a connection first.");
+        }
+        return this.netconfSession.getNegotiatedCapabilities();
+    }
+
+    /**
      * Check if the last RPC reply returned from Netconf server has any error.
      *
      * @return true if any errors are found in last RPC reply.
@@ -1267,8 +1287,13 @@ public class Device implements AutoCloseable {
     /**
      * Validate the candidate configuration.
      *
-     * @return true if validation successful.
+     * @return {@code true} if validation completed with a clean {@code <ok/>}
+     *         reply; {@code false} for warning-only or other non-error
+     *         non-{@code <ok/>} replies
      * @throws java.io.IOException      If there are errors communicating with the netconf server.
+     * @throws net.juniper.netconf.ValidateException if the server returns one
+     *                                               or more {@code <rpc-error>}
+     *                                               elements
      * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
      */
     public boolean validate() throws IOException, SAXException {

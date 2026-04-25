@@ -2,7 +2,7 @@
 
 This document describes what `netconf-java` currently implements. It is an implementation matrix, not a blanket compliance claim. Interoperability still depends on the server's advertised capabilities and on whether the application stays within the library's supported session model.
 
-Mental model: today the library is a synchronous, JSch-backed NETCONF-over-SSH client. Its strongest path is one sequential RPC conversation per `NetconfSession`, with explicit timeouts and explicit cleanup. Core NETCONF 1.0 and 1.1 framing is supported, several Junos workflows are wrapped ergonomically, and the main standards gap is that optional features are not yet enforced uniformly through capability negotiation.
+Mental model: today the library is a synchronous, JSch-backed NETCONF-over-SSH client. Its strongest path is one sequential RPC conversation per `NetconfSession`, with explicit timeouts and explicit cleanup. Core NETCONF 1.0 and 1.1 framing is supported, several Junos workflows are wrapped ergonomically, and optional features are beginning to be enforced through capability negotiation, though coverage is not yet uniform across all extensions.
 
 ## Status legend
 
@@ -18,9 +18,9 @@ Mental model: today the library is a synchronous, JSch-backed NETCONF-over-SSH c
 | Standard / feature | Status | Notes |
 | --- | --- | --- |
 | RFC 6242 SSH subsystem transport | `Supported` | `Device` opens an SSH subsystem channel with `subsystem=netconf` over JSch. |
-| RFC 6241 `<hello>` parsing and generation | `Supported with caveats` | `Hello` parsing/building works, and `Hello.builder()` auto-adds `urn:ietf:params:netconf:base:1.1`. The library does not currently fail the session if the peers do not share a common base capability. |
+| RFC 6241 `<hello>` parsing and generation | `Supported with caveats` | `Hello` parsing/building works, `Hello.builder()` auto-adds `urn:ietf:params:netconf:base:1.1`, and session establishment now fails if the peers do not share a common NETCONF base capability. The remaining caveat is that the client still cannot intentionally advertise only `base:1.0`. |
 | NETCONF 1.0 end-of-message framing (`]]>]]>`) | `Supported` | Legacy framing is still supported for both outbound and inbound messages. |
-| NETCONF 1.1 chunked framing | `Supported` | Chunked framing is enabled when the server `<hello>` advertises `urn:ietf:params:netconf:base:1.1`. |
+| NETCONF 1.1 chunked framing | `Supported` | Chunked framing is selected when both peers share `urn:ietf:params:netconf:base:1.1`. |
 | NETCONF 1.0 server interoperability | `Supported with caveats` | A 1.0-only server can interoperate because the client still advertises `base:1.0` and can read/write legacy framing. |
 | NETCONF 1.0-only client advertisement | `Not implemented` | The client cannot intentionally advertise only `base:1.0`; `Hello.builder()` always injects `base:1.1`. |
 | RPC `message-id` generation and reply correlation | `Supported with caveats` | Missing `message-id` attributes are injected, replies are validated, and sequential same-session alignment is covered by tests. One `NetconfSession` is still a sequential conversation, not a safe multiplexed channel for concurrent in-flight RPCs. |
@@ -35,11 +35,11 @@ Mental model: today the library is a synchronous, JSch-backed NETCONF-over-SSH c
 | --- | --- | --- |
 | `<get>` | `Supported` | `getRunningConfigAndState(...)` issues `<get>`. |
 | `<get-config>` | `Supported` | Candidate and running helpers exist. |
-| `<edit-config>` to candidate | `Supported with caveats` | `loadXMLConfiguration(...)` and `loadTextConfiguration(...)` target `candidate`. The API does not expose `test-option`, `error-option`, or capability-gated behavior checks before use. |
-| `:candidate:1.0` | `Supported with caveats` | Candidate-oriented helpers are a primary workflow, but the default client capability still uses the legacy `urn:ietf:params:netconf:base:1.0#candidate` form rather than the RFC 6241 `urn:ietf:params:netconf:capability:candidate:1.0` URN. |
+| `<edit-config>` to candidate | `Supported with caveats` | `loadXMLConfiguration(...)` and `loadTextConfiguration(...)` target `candidate`, and candidate-dependent operations now fail locally when the server did not advertise candidate support. The API still does not expose `test-option` or `error-option`. |
+| `:candidate:1.0` | `Supported with caveats` | Candidate-oriented helpers are a primary workflow and are now runtime-gated against the server `<hello>`, but the default client capability still uses the legacy `urn:ietf:params:netconf:base:1.0#candidate` form rather than the RFC 6241 `urn:ietf:params:netconf:capability:candidate:1.0` URN. |
 | `<commit>` | `Supported` | Standard commit is implemented. |
-| `:confirmed-commit:1.1` | `Supported with caveats` | `commitConfirm(seconds, persistToken)` and `cancelCommit(persistId)` exist, but the default client capability still uses the legacy `base:1.0#confirmed-commit` form instead of the RFC 6241 capability URN. |
-| `:validate:1.0` | `Supported with caveats` | `validate()` is implemented against candidate, but default advertisement still uses the legacy `base:1.0#validate` URI and the call is not capability-gated at runtime. |
+| `:confirmed-commit:1.1` | `Supported with caveats` | `commitConfirm(seconds, persistToken)` and `cancelCommit(persistId)` are runtime-gated. Persist-based flows require modern `confirmed-commit:1.1`, while legacy confirmed-commit remains usable for same-session confirmation flows without `persist`. The default client capability advertisement still uses the legacy `base:1.0#confirmed-commit` form. |
+| `:validate:1.0` | `Supported with caveats` | `validate()` is implemented against candidate and now fails locally when validate support is absent, but default advertisement still uses the legacy `base:1.0#validate` URI. |
 | `<lock>` / `<unlock>` | `Partial` | Candidate lock/unlock helpers exist. There is no first-class running datastore lock helper. |
 | `:writable-running:1.0` | `Partial` | Running config retrieval exists, but there is no `edit-config` helper that targets `running` and the capability is not advertised by default. |
 | `:startup:1.0` | `Not implemented` | No first-class startup datastore copy/delete flows are present. |
@@ -79,7 +79,7 @@ Mental model: today the library is a synchronous, JSch-backed NETCONF-over-SSH c
 ## Interoperability caveats worth knowing
 
 - Default optional capability advertisement still uses legacy `urn:ietf:params:netconf:base:1.0#...` forms in `Device.DEFAULT_CLIENT_CAPABILITIES`. Many servers accept these, but strict RFC 6241 capability matching may not.
-- Capability negotiation is parsed but not enforced consistently before invoking optional operations. The caller can request candidate, validate, confirmed-commit, or NMDA operations even if the server never advertised them.
+- Candidate, validate, and confirmed-commit flows are now capability-gated before the RPC is sent. Other optional operations are still not enforced uniformly, especially outside the classic RFC 6241 capability set.
 - `NetconfSession` should be treated as a single sequential request/response channel. Use separate sessions for concurrent workflows.
 - The SSH transport is still tightly coupled to JSch. That preserves the current JSch-based deployment model, including existing FIPS-oriented environments, but transport abstraction is future work rather than current behavior.
 
