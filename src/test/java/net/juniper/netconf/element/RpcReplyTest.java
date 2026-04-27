@@ -1,6 +1,7 @@
 package net.juniper.netconf.element;
 
 import org.junit.jupiter.api.Test;
+import org.w3c.dom.Document;
 import org.xmlunit.assertj.XmlAssert;
 
 import java.util.Arrays;
@@ -235,6 +236,23 @@ public class RpcReplyTest {
             .and(RPC_REPLY_WITH_ERRORS)
             .ignoreWhitespace()
             .areIdentical();
+    }
+
+    @Test
+    public void builderWillDefensivelyCopyOriginalDocument() throws Exception {
+        final Document originalDocument = RpcReply.parseRpcReplyDocument(RPC_REPLY_WITH_OK);
+
+        final RpcReply.Builder builder = RpcReply.builder()
+            .originalDocument(originalDocument)
+            .messageId("5")
+            .ok(true);
+
+        originalDocument.getDocumentElement().setAttribute("message-id", "999");
+
+        final RpcReply rpcReply = builder.build();
+
+        assertThat(rpcReply.getDocument().getDocumentElement().getAttribute("message-id"))
+            .isEqualTo("5");
     }
 
     /**

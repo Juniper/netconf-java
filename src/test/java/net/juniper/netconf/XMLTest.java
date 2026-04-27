@@ -133,10 +133,12 @@ public class XMLTest {
         XMLBuilder builder = new XMLBuilder();
         XML xml = builder.createNewXML("parent");
 
-        xml.addPath("level1/level2/leaf");
+        XML nested = xml.addPath("level1/level2/leaf");
 
         assertThat(xml.toString())
             .containsIgnoringWhitespaces("<parent><level1><level2><leaf/></level2></level1></parent>");
+        assertThat(nested.toString())
+            .containsIgnoringWhitespaces("<leaf/>");
     }
 
     @Test

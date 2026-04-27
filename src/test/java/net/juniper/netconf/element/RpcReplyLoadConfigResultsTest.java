@@ -1,9 +1,11 @@
 package net.juniper.netconf.element;
 
 import org.junit.jupiter.api.Test;
+import org.w3c.dom.Document;
 import org.xmlunit.assertj.XmlAssert;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 public class RpcReplyLoadConfigResultsTest {
 
@@ -26,6 +28,9 @@ public class RpcReplyLoadConfigResultsTest {
                 <nc:ok/>
             </load-configuration-results>
         </nc:rpc-reply>""";
+
+    private static final String LOAD_CONFIG_RESULTS_OK_NO_NAMESPACE_FRAMED =
+        LOAD_CONFIG_RESULTS_OK_NO_NAMESPACE + "]]>]]>";
 
     private static final String LOAD_CONFIG_RESULTS_ERROR_NO_NAMESPACE = ""
         + "<rpc-reply xmlns=\"urn:ietf:params:xml:ns:netconf:base:1.0\"" +
@@ -110,6 +115,21 @@ public class RpcReplyLoadConfigResultsTest {
     }
 
     @Test
+    public void willParseAnOkResponseWithDelimiterViaDirectParser() throws Exception {
+
+        final RpcReplyLoadConfigResults rpcReply = RpcReplyLoadConfigResults.from(LOAD_CONFIG_RESULTS_OK_NO_NAMESPACE_FRAMED);
+
+        assertThat(rpcReply.getMessageId())
+            .isEqualTo("3");
+        assertThat(rpcReply.getAction())
+            .isEqualTo("set");
+        assertThat(rpcReply.isOK())
+            .isTrue();
+        assertThat(rpcReply.getErrors())
+            .isEmpty();
+    }
+
+    @Test
     public void willParseAnErrorResponseWithoutNamespacePrefix() throws Exception {
 
         final RpcReplyLoadConfigResults rpcReply = RpcReply.from(LOAD_CONFIG_RESULTS_ERROR_NO_NAMESPACE);
@@ -165,6 +185,54 @@ public class RpcReplyLoadConfigResultsTest {
                     .badElement("foobar")
                     .build())
                 .build());
+    }
+
+    @Test
+    public void willRejectDtdInLoadConfigurationResultsReply() {
+        String withDtd = """
+        <!DOCTYPE rpc-reply [
+           <!ELEMENT rpc-reply ANY >
+        ]>
+        <rpc-reply xmlns="urn:ietf:params:xml:ns:netconf:base:1.0" message-id="7">
+          <load-configuration-results action="set">
+            <ok/>
+          </load-configuration-results>
+        </rpc-reply>
+        """;
+
+        assertThatThrownBy(() -> RpcReplyLoadConfigResults.from(withDtd))
+            .isInstanceOf(Exception.class)
+            .hasMessageContaining("DOCTYPE");
+    }
+
+    @Test
+    public void willThrowWhenMessageIdIsMissingFromLoadConfigurationResultsReply() {
+        String withoutMessageId = """
+        <rpc-reply xmlns="urn:ietf:params:xml:ns:netconf:base:1.0">
+          <load-configuration-results action="set">
+            <ok/>
+          </load-configuration-results>
+        </rpc-reply>
+        """;
+
+        assertThatThrownBy(() -> RpcReplyLoadConfigResults.from(withoutMessageId))
+            .isInstanceOf(javax.xml.xpath.XPathExpressionException.class)
+            .hasMessageContaining("message-id");
+    }
+
+    @Test
+    public void willThrowWhenActionIsMissingFromLoadConfigurationResultsReply() {
+        String withoutAction = """
+        <rpc-reply xmlns="urn:ietf:params:xml:ns:netconf:base:1.0" message-id="8">
+          <load-configuration-results>
+            <ok/>
+          </load-configuration-results>
+        </rpc-reply>
+        """;
+
+        assertThatThrownBy(() -> RpcReplyLoadConfigResults.from(withoutAction))
+            .isInstanceOf(javax.xml.xpath.XPathExpressionException.class)
+            .hasMessageContaining("action");
     }
 
     @Test
@@ -245,6 +313,58 @@ public class RpcReplyLoadConfigResultsTest {
             .and(LOAD_CONFIG_RESULTS_ERROR_WITH_NAMESPACE)
             .ignoreWhitespace()
             .areIdentical();
+    }
+
+    @Test
+    public void builderWillTreatNullErrorsAsEmptyList() {
+
+        final RpcReplyLoadConfigResults rpcReply = RpcReplyLoadConfigResults.loadConfigResultsBuilder()
+            .messageId("7")
+            .action("set")
+            .errors(null)
+            .build();
+
+        assertThat(rpcReply.getErrors())
+            .isEmpty();
+        assertThat(rpcReply.hasErrorsOrWarnings())
+            .isFalse();
+    }
+
+    @Test
+    public void builderWillAllowExplicitNullOriginalDocument() {
+
+        final RpcReplyLoadConfigResults rpcReply = RpcReplyLoadConfigResults.loadConfigResultsBuilder()
+            .originalDocument(null)
+            .messageId("8")
+            .action("set")
+            .ok(true)
+            .build();
+
+        assertThat(rpcReply.getMessageId())
+            .isEqualTo("8");
+        assertThat(rpcReply.getAction())
+            .isEqualTo("set");
+        assertThat(rpcReply.isOK())
+            .isTrue();
+    }
+
+    @Test
+    public void builderWillDefensivelyCopyOriginalDocument() throws Exception {
+
+        final Document originalDocument = RpcReply.parseRpcReplyDocument(LOAD_CONFIG_RESULTS_OK_NO_NAMESPACE);
+
+        final RpcReplyLoadConfigResults.Builder builder = RpcReplyLoadConfigResults.loadConfigResultsBuilder()
+            .originalDocument(originalDocument)
+            .messageId("3")
+            .action("set")
+            .ok(true);
+
+        originalDocument.getDocumentElement().setAttribute("message-id", "999");
+
+        final RpcReplyLoadConfigResults rpcReply = builder.build();
+
+        assertThat(rpcReply.getDocument().getDocumentElement().getAttribute("message-id"))
+            .isEqualTo("3");
     }
 
 }
