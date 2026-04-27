@@ -3,7 +3,6 @@ package net.juniper.netconf.element;
 import net.juniper.netconf.NetconfConstants;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
-import org.xml.sax.InputSource;
 import org.xml.sax.SAXException;
 
 import javax.xml.parsers.ParserConfigurationException;
@@ -12,7 +11,6 @@ import javax.xml.xpath.XPathConstants;
 import javax.xml.xpath.XPathExpressionException;
 import javax.xml.xpath.XPathFactory;
 import java.io.IOException;
-import java.io.StringReader;
 import java.util.List;
 import java.util.Objects;
 
@@ -41,26 +39,33 @@ public class RpcReplyLoadConfigResults extends RpcReply {
      * @throws SAXException                 if the XML is not well‑formed
      * @throws XPathExpressionException     if required nodes cannot be located
      */
+    @SuppressWarnings("unchecked")
     public static RpcReplyLoadConfigResults from(final String xml)
         throws ParserConfigurationException, IOException, SAXException, XPathExpressionException {
-
-        final Document document = createDocumentBuilderFactory().newDocumentBuilder()
-            .parse(new InputSource(new StringReader(xml)));
+        final Document document = parseRpcReplyDocument(xml);
         final XPath xPath = XPathFactory.newInstance().newXPath();
+        return fromDocument(document, xPath);
+    }
 
-        final Element rpcReplyElement = (Element) xPath.evaluate(XPATH_RPC_REPLY, document, XPathConstants.NODE);
-        final Element loadConfigResultsElement = (Element) xPath.evaluate(RpcReplyLoadConfigResults.XPATH_RPC_REPLY_LOAD_CONFIG_RESULT, document, XPathConstants.NODE);
+    static RpcReplyLoadConfigResults fromDocument(final Document document, final XPath xPath)
+        throws XPathExpressionException {
+        final Element rpcReplyElement = requireElement(
+            (Element) xPath.evaluate(XPATH_RPC_REPLY, document, XPathConstants.NODE),
+            "Missing required <rpc-reply> element");
+        final Element loadConfigResultsElement = requireElement(
+            (Element) xPath.evaluate(RpcReplyLoadConfigResults.XPATH_RPC_REPLY_LOAD_CONFIG_RESULT, document, XPathConstants.NODE),
+            "Missing required <load-configuration-results> element");
         final Element rpcReplyOkElement = (Element) xPath.evaluate(XPATH_RPC_REPLY_LOAD_CONFIG_RESULT_OK, document, XPathConstants.NODE);
         final List<RpcError> errorList = getRpcErrors(document, xPath, XPATH_RPC_REPLY_LOAD_CONFIG_RESULT_ERROR);
 
-        return RpcReplyLoadConfigResults.loadConfigResultsBuilder()
-            .originalDocument(document)
-            .namespacePrefix(null)
-            .messageId(getAttribute(rpcReplyElement, "message-id"))
-            .action(getAttribute(loadConfigResultsElement, "action"))
-            .ok(rpcReplyOkElement != null)
-            .errors(errorList)
-            .build();
+        return new RpcReplyLoadConfigResults(
+            null,
+            document,
+            requireAttribute(rpcReplyElement, "message-id", "rpc-reply"),
+            requireAttribute(loadConfigResultsElement, "action", "load-configuration-results"),
+            rpcReplyOkElement != null,
+            errorList
+        );
     }
 
     private RpcReplyLoadConfigResults(
@@ -121,12 +126,12 @@ public class RpcReplyLoadConfigResults extends RpcReply {
 
         /**
          * Sets the original XML Document for the reply.
-         * @param originalDocument the XML Document, must not be null
+         * @param originalDocument the XML Document, may be null. A defensive
+         *                         copy is taken immediately.
          * @return this Builder
-         * @throws NullPointerException if originalDocument is null
          */
         public Builder originalDocument(Document originalDocument) {
-            this.originalDocument = Objects.requireNonNull(originalDocument, "originalDocument must not be null");
+            this.originalDocument = copyDocument(originalDocument);
             return this;
         }
 
@@ -174,12 +179,11 @@ public class RpcReplyLoadConfigResults extends RpcReply {
 
         /**
          * Sets the list of errors for the reply.
-         * @param errors the list of errors, must not be null
+         * @param errors the list of errors, or null to clear them
          * @return this Builder
-         * @throws NullPointerException if errors is null
          */
         public Builder errors(List<RpcError> errors) {
-            this.errors = new java.util.ArrayList<>(Objects.requireNonNull(errors, "errors list must not be null"));
+            this.errors = errors == null ? new java.util.ArrayList<>() : new java.util.ArrayList<>(errors);
             return this;
         }
 
@@ -233,7 +237,9 @@ public class RpcReplyLoadConfigResults extends RpcReply {
         final List<RpcError> errors) {
         final Document createdDocument = createBlankDocument();
         final Element rpcReplyElement = createdDocument.createElementNS(NetconfConstants.URN_XML_NS_NETCONF_BASE_1_0, "rpc-reply");
-        rpcReplyElement.setPrefix(namespacePrefix);
+        if (namespacePrefix != null) {
+            rpcReplyElement.setPrefix(namespacePrefix);
+        }
         rpcReplyElement.setAttribute("message-id", messageId);
         createdDocument.appendChild(rpcReplyElement);
         final Element loadConfigResultsElement = createdDocument.createElement("load-configuration-results");
@@ -242,11 +248,31 @@ public class RpcReplyLoadConfigResults extends RpcReply {
         appendErrors(namespacePrefix, errors, createdDocument, loadConfigResultsElement);
         if (ok) {
             final Element okElement = createdDocument.createElementNS(NetconfConstants.URN_XML_NS_NETCONF_BASE_1_0, "ok");
-            okElement.setPrefix(namespacePrefix);
+            if (namespacePrefix != null) {
+                okElement.setPrefix(namespacePrefix);
+            }
             loadConfigResultsElement.appendChild(okElement);
         }
 
         return createdDocument;
+    }
+
+    private static Element requireElement(final Element element, final String message)
+        throws XPathExpressionException {
+        if (element == null) {
+            throw new XPathExpressionException(message);
+        }
+        return element;
+    }
+
+    private static String requireAttribute(final Element element, final String attributeName, final String elementName)
+        throws XPathExpressionException {
+        final String attributeValue = trim(getAttribute(element, attributeName));
+        if (attributeValue == null || attributeValue.isEmpty()) {
+            throw new XPathExpressionException(
+                String.format("Missing required @%s attribute on <%s>", attributeName, elementName));
+        }
+        return attributeValue;
     }
 
     @Override
@@ -276,8 +302,8 @@ public class RpcReplyLoadConfigResults extends RpcReply {
      *
      * @return copy of the error list
      */
-    @SuppressWarnings("unchecked") // parent class returns raw List
+    @Override
     public List<RpcError> getErrors() {
-        return new java.util.ArrayList<>((List<RpcError>) super.getErrors());
+        return new java.util.ArrayList<>(super.getErrors());
     }
 }

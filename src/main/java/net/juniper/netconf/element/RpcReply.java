@@ -123,11 +123,12 @@ public class RpcReply extends AbstractNetconfElement {
         /**
          * Sets the original {@link Document} this reply was parsed from.
          *
-         * @param originalDocument the source DOM {@link Document}; may be {@code null}
+         * @param originalDocument the source DOM {@link Document}; may be {@code null}.
+         *                         A defensive copy is taken immediately.
          * @return this {@code Builder} instance for method chaining
          */
         public Builder originalDocument(Document originalDocument) {
-            this.originalDocument = originalDocument;
+            this.originalDocument = copyDocument(originalDocument);
             return this;
         }
 
@@ -319,6 +320,27 @@ public class RpcReply extends AbstractNetconfElement {
     }
 
     /**
+     * Parses a NETCONF rpc-reply document after applying the common wire-format
+     * hygiene checks shared by all rpc-reply variants.
+     *
+     * @param xml raw NETCONF XML, optionally terminated with the RFC 6242
+     *            end-of-message delimiter
+     * @return parsed DOM document
+     * @throws ParserConfigurationException if a parser cannot be configured
+     * @throws IOException if the input cannot be read
+     * @throws SAXException if the XML is not well-formed
+     */
+    protected static Document parseRpcReplyDocument(final String xml)
+        throws ParserConfigurationException, IOException, SAXException {
+        final String cleaned = stripEomDelimiter(xml);
+        if (cleaned.contains("<!DOCTYPE")) {
+            throw new IllegalArgumentException("DOCTYPE declarations are not allowed in NETCONF messages (RFC 6241 §3.2)");
+        }
+        return createDocumentBuilderFactory().newDocumentBuilder()
+            .parse(new InputSource(new StringReader(cleaned)));
+    }
+
+    /**
      * Parses the given NETCONF XML string into an {@code RpcReply} (or subtype).
      *
      * @param <T> the concrete subtype of {@link AbstractNetconfElement} to return
@@ -333,17 +355,12 @@ public class RpcReply extends AbstractNetconfElement {
     public static <T extends AbstractNetconfElement> T from(final String xml)
         throws ParserConfigurationException, IOException, SAXException, XPathExpressionException {
 
-        String cleaned = stripEomDelimiter(xml);
-        if (cleaned.contains("<!DOCTYPE")) {
-            throw new IllegalArgumentException("DOCTYPE declarations are not allowed in NETCONF messages (RFC 6241 §3.2)");
-        }
-        final Document document = createDocumentBuilderFactory().newDocumentBuilder()
-            .parse(new InputSource(new StringReader(cleaned)));
+        final Document document = parseRpcReplyDocument(xml);
         final XPath xPath = XPathFactory.newInstance().newXPath();
 
         final Element loadConfigResultsElement = (Element) xPath.evaluate(RpcReplyLoadConfigResults.XPATH_RPC_REPLY_LOAD_CONFIG_RESULT, document, XPathConstants.NODE);
         if (loadConfigResultsElement != null) {
-            return (T) RpcReplyLoadConfigResults.from(xml);
+            return (T) RpcReplyLoadConfigResults.fromDocument(document, xPath);
         }
 
         final Element rpcReplyElement = (Element) xPath.evaluate(XPATH_RPC_REPLY, document, XPathConstants.NODE);

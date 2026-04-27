@@ -6,7 +6,7 @@ plugins {
 }
 
 group = 'net.juniper.netconf'
-version = '2.2.1.0'
+version = '2.2.1.1'
 description = 'An API For NetConf client'
 
 java {

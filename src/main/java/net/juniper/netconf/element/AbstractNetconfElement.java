@@ -14,6 +14,7 @@ import javax.xml.transform.TransformerFactory;
 import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stream.StreamResult;
 import java.io.StringWriter;
+import java.util.Objects;
 
 import static java.lang.String.format;
 
@@ -46,8 +47,9 @@ public abstract class AbstractNetconfElement {
      * @throws NullPointerException if {@code document} is {@code null}
      */
     protected AbstractNetconfElement(final Document document) {
-        this.document = document;
-        this.xml = createXml(document);
+        final Document documentCopy = Objects.requireNonNull(copyDocument(document), "document");
+        this.document = documentCopy;
+        this.xml = createXml(documentCopy);
     }
 
     /**
@@ -57,7 +59,18 @@ public abstract class AbstractNetconfElement {
      * @return a cloned {@link Document} representing this element
      */
     public Document getDocument() {
-        return (Document) document.cloneNode(true); // deep copy
+        return copyDocument(document);
+    }
+
+    /**
+     * Returns a defensive deep copy of the supplied DOM {@link Document}.
+     *
+     * @param document source document; may be {@code null}
+     * @return deep copy of {@code document}, or {@code null} when the input is
+     *         {@code null}
+     */
+    protected static Document copyDocument(final Document document) {
+        return document == null ? null : (Document) document.cloneNode(true);
     }
 
     /**
