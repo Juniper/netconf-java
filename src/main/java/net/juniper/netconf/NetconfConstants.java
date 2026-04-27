@@ -47,6 +47,13 @@ public class NetconfConstants {
      */
     public static final String URN_IETF_PARAMS_NETCONF_BASE_1_0 = "urn:ietf:params:netconf:base:1.0";
 
+    /**
+     * URI form of the NETCONF Base 1.1 capability identifier.
+     *
+     * @see <a href="https://www.rfc-editor.org/rfc/rfc6242">RFC&nbsp;6242</a>
+     */
+    public static final String URN_IETF_PARAMS_NETCONF_BASE_1_1 = "urn:ietf:params:netconf:base:1.1";
+
     /* ------------------------------------------------------------------
      * Misc helpers
      * ------------------------------------------------------------------ */

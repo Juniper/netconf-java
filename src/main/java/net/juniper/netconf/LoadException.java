@@ -7,7 +7,7 @@
 
 package net.juniper.netconf;
 
-import java.io.IOException;
+import net.juniper.netconf.element.RpcReply;
 
 /**
  * Exception thrown when a <em>load</em> RPC returns &lt;rpc-error&gt; or otherwise
@@ -20,7 +20,7 @@ import java.io.IOException;
  *   <li>just the root cause.</li>
  * </ol>
  */
-public class LoadException extends IOException {
+public class LoadException extends RpcErrorException {
 
     /**
      * Creates a {@code LoadException} with the supplied message.
@@ -39,6 +39,16 @@ public class LoadException extends IOException {
      */
     public LoadException(String message, Throwable cause) {
         super(message, cause);
+    }
+
+    /**
+     * Creates a {@code LoadException} with a message and parsed reply.
+     *
+     * @param message description of the load failure
+     * @param rpcReply parsed NETCONF reply that triggered the failure
+     */
+    public LoadException(String message, RpcReply rpcReply) {
+        super(message, rpcReply);
     }
 
     /**

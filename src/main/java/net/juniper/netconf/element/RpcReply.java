@@ -33,8 +33,9 @@ public class RpcReply extends AbstractNetconfElement {
     /** XPath for the &lt;ok&gt; element inside an &lt;rpc-reply&gt;. */
     private static final String XPATH_RPC_REPLY_OK = XPATH_RPC_REPLY + getXpathFor("ok");
 
-    /** XPath for any &lt;rpc-error&gt; elements inside the reply. */
-    private static final String XPATH_RPC_REPLY_ERROR = XPATH_RPC_REPLY + getXpathFor("rpc-error");
+    /** XPath for any NETCONF &lt;rpc-error&gt; descendants inside the reply. */
+    private static final String XPATH_RPC_REPLY_ERROR =
+        XPATH_RPC_REPLY + "//*[namespace-uri()='urn:ietf:params:xml:ns:netconf:base:1.0' and local-name()='rpc-error']";
 
     /** XPath for the &lt;error-type&gt; child of an &lt;rpc-error&gt;. */
     private static final String XPATH_RPC_REPLY_ERROR_TYPE = getXpathFor("error-type");
@@ -333,6 +334,9 @@ public class RpcReply extends AbstractNetconfElement {
         throws ParserConfigurationException, IOException, SAXException, XPathExpressionException {
 
         String cleaned = stripEomDelimiter(xml);
+        if (cleaned.contains("<!DOCTYPE")) {
+            throw new IllegalArgumentException("DOCTYPE declarations are not allowed in NETCONF messages (RFC 6241 §3.2)");
+        }
         final Document document = createDocumentBuilderFactory().newDocumentBuilder()
             .parse(new InputSource(new StringReader(cleaned)));
         final XPath xPath = XPathFactory.newInstance().newXPath();
@@ -469,9 +473,9 @@ public class RpcReply extends AbstractNetconfElement {
         this.namespacePrefix = namespacePrefix;
         this.messageId = messageId;
         this.ok = ok;
-        this.errors = errors;
+        this.errors = errors == null ? List.of() : List.copyOf(errors);
         this.sessionId = sessionId;
-        this.capabilities = capabilities;
+        this.capabilities = capabilities == null ? List.of() : List.copyOf(capabilities);
     }
 
     /**

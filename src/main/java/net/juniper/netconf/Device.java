@@ -19,15 +19,21 @@ import org.slf4j.LoggerFactory;
 import org.w3c.dom.Document;
 import org.xml.sax.SAXException;
 
+import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.parsers.ParserConfigurationException;
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.net.SocketTimeoutException;
 import java.nio.charset.Charset;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.TimeUnit;
 
 /**
  * A <code>Device</code> is used to define a Netconf server.
@@ -58,6 +64,7 @@ public class Device implements AutoCloseable {
 
     private static final int DEFAULT_NETCONF_PORT = 830;
     private static final int DEFAULT_TIMEOUT = 5000;
+    private static final long SHELL_READ_POLL_INTERVAL_MILLIS = 10L;
     private static final List<String> DEFAULT_CLIENT_CAPABILITIES = Arrays.asList(
         NetconfConstants.URN_IETF_PARAMS_NETCONF_BASE_1_0,
         NetconfConstants.URN_IETF_PARAMS_NETCONF_BASE_1_0 + "#candidate",
@@ -83,6 +90,7 @@ public class Device implements AutoCloseable {
 
     private final DocumentBuilder xmlBuilder;
     private final List<String> netconfCapabilities;
+    private final List<String> advertisedNetconfCapabilities;
     private final String helloRpc;
 
     private ChannelSubsystem sshChannel;
@@ -361,12 +369,14 @@ public class Device implements AutoCloseable {
         this.netconfCapabilities = b.netconfCapabilities;
 
         try {
-            this.xmlBuilder = javax.xml.parsers.DocumentBuilderFactory.newInstance().newDocumentBuilder();
-        } catch (javax.xml.parsers.ParserConfigurationException e) {
+            this.xmlBuilder = createSecureDocumentBuilder();
+        } catch (ParserConfigurationException e) {
             throw new NetconfException("Cannot create XML Parser", e);
         }
 
-        this.helloRpc = createHelloRPC(this.netconfCapabilities);
+        Hello hello = createHello(this.netconfCapabilities);
+        this.advertisedNetconfCapabilities = hello.getCapabilities();
+        this.helloRpc = createHelloRPC(hello);
     }
 
 
@@ -378,7 +388,7 @@ public class Device implements AutoCloseable {
      * @return List of default client capabilities.
      */
     protected List<String> getDefaultClientCapabilities() {
-        return DEFAULT_CLIENT_CAPABILITIES;
+        return createHello(DEFAULT_CLIENT_CAPABILITIES).getCapabilities();
     }
 
     /**
@@ -388,12 +398,14 @@ public class Device implements AutoCloseable {
      * @param capabilities A list of netconf capabilities
      * @return the hello RPC that represents those capabilities.
      */
-    private String createHelloRPC(List<String> capabilities) {
+    private Hello createHello(List<String> capabilities) {
         return Hello.builder()
             .capabilities(capabilities)
-            .build()
-            .getXml()
-            + NetconfConstants.DEVICE_PROMPT;
+            .build();
+    }
+
+    private String createHelloRPC(Hello hello) {
+        return hello.getXml() + NetconfConstants.DEVICE_PROMPT;
     }
 
     /**
@@ -403,6 +415,9 @@ public class Device implements AutoCloseable {
      * @throws NetconfException if there are issues communicating with the Netconf server.
      */
     private NetconfSession createNetconfSession() throws NetconfException {
+        Session session = sshSession;
+        ChannelSubsystem channel = null;
+        boolean disconnectSessionOnFailure = false;
         if (!isConnected()) {
             try {
                 if (strictHostKeyChecking) {
@@ -418,28 +433,47 @@ public class Device implements AutoCloseable {
             log.info("Connecting to host {} on port {}.", hostName, port);
             if (keyBasedAuthentication) {
                 loadPrivateKey();
-                sshSession = loginWithPrivateKey(connectionTimeout);
+                session = loginWithPrivateKey(connectionTimeout);
             } else {
-                sshSession = loginWithUserPass(connectionTimeout);
+                session = loginWithUserPass(connectionTimeout);
             }
+            disconnectSessionOnFailure = true;
             try {
-                sshSession.setTimeout(connectionTimeout);
+                session.setTimeout(connectionTimeout);
             } catch (JSchException e) {
+                cleanupFailedSessionInitialization(channel, session, disconnectSessionOnFailure);
                 throw new NetconfException(String.format("Error setting session timeout: %s", e.getMessage()), e);
             }
-            if (sshSession.isConnected()) {
-                log.info("Connected to host {} - Timeout set to {} msecs.", hostName, sshSession.getTimeout());
+            if (session.isConnected()) {
+                log.info("Connected to host {} - Timeout set to {} msecs.", hostName, session.getTimeout());
             } else {
+                cleanupFailedSessionInitialization(channel, session, disconnectSessionOnFailure);
                 throw new NetconfException("Failed to connect to host. Unknown reason");
             }
         }
         try {
-            sshChannel = (ChannelSubsystem) sshSession.openChannel("subsystem");
-            sshChannel.setSubsystem("netconf");
-            return new NetconfSession(sshChannel, connectionTimeout, commandTimeout, helloRpc, xmlBuilder);
+            channel = (ChannelSubsystem) session.openChannel("subsystem");
+            channel.setSubsystem("netconf");
+            NetconfSession establishedSession =
+                new NetconfSession(channel, connectionTimeout, commandTimeout,
+                    advertisedNetconfCapabilities, helloRpc, xmlBuilder);
+            sshSession = session;
+            sshChannel = channel;
+            return establishedSession;
         } catch (JSchException | IOException e) {
+            cleanupFailedSessionInitialization(channel, session, disconnectSessionOnFailure);
             throw new NetconfException("Failed to create Netconf session:" +
                 e.getMessage(), e);
+        }
+    }
+
+    private void cleanupFailedSessionInitialization(ChannelSubsystem channel, Session session,
+                                                    boolean disconnectSessionOnFailure) {
+        if (channel != null) {
+            channel.disconnect();
+        }
+        if (disconnectSessionOnFailure && session != null) {
+            session.disconnect();
         }
     }
 
@@ -490,6 +524,20 @@ public class Device implements AutoCloseable {
         } catch (JSchException e) {
             throw new NetconfException(String.format("Error parsing the pemKeyFile: %s", e.getMessage()), e);
         }
+    }
+
+    private static DocumentBuilder createSecureDocumentBuilder() throws ParserConfigurationException {
+        DocumentBuilderFactory documentBuilderFactory = DocumentBuilderFactory.newInstance();
+        documentBuilderFactory.setNamespaceAware(true);
+        documentBuilderFactory.setExpandEntityReferences(false);
+        documentBuilderFactory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+        documentBuilderFactory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+        documentBuilderFactory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+        documentBuilderFactory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+        documentBuilderFactory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+        documentBuilderFactory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "");
+        documentBuilderFactory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
+        return documentBuilderFactory.newDocumentBuilder();
     }
 
     /**
@@ -549,41 +597,23 @@ public class Device implements AutoCloseable {
      * Execute a command in shell mode.
      *
      * @param command The command to be executed in shell mode.
-     * @return Result of the command execution, as a String.
+     * @return Result of the command execution, as a String. Waiting for
+     * command output is bounded by {@link #getCommandTimeout()}.
      * @throws IOException if there are issues communicating with the Netconf server.
      */
     public String runShellCommand(String command) throws IOException {
         if (!isConnected()) {
             return "Could not find open connection.";
         }
-        ChannelExec channel;
-        try {
-            channel = (ChannelExec) sshSession.openChannel("exec");
-        } catch (JSchException e) {
-            throw new NetconfException(String.format("Failed to open exec session: %s", e.getMessage()), e);
-        }
-        channel.setCommand(command);
-        InputStream stdout;
-        BufferedReader bufferReader;
-        stdout = channel.getInputStream();
-
-        bufferReader = new BufferedReader(new InputStreamReader(stdout, Charset.defaultCharset()));
-        try {
+        try (BufferedReader bufferReader = openExecChannelReader(command)) {
             StringBuilder reply = new StringBuilder();
             while (true) {
-                String line;
-                try {
-                    line = bufferReader.readLine();
-                } catch (Exception e) {
-                    throw new NetconfException(e.getMessage(), e);
-                }
+                String line = bufferReader.readLine();
                 if (line == null || line.equals(NetconfConstants.EMPTY_LINE))
                     break;
                 reply.append(line).append(NetconfConstants.LF);
             }
             return reply.toString();
-        } finally {
-            bufferReader.close();
         }
     }
 
@@ -593,7 +623,9 @@ public class Device implements AutoCloseable {
      * @param command The command to be executed in shell mode.
      * @return Result of the command execution, as a BufferedReader. This is
      * useful if we want continuous stream of output, rather than wait
-     * for whole output till command execution completes.
+     * for whole output till command execution completes. Closing the returned
+     * reader also disconnects the underlying SSH exec channel. Each blocking
+     * read waits at most {@link #getCommandTimeout()} for additional output.
      * @throws IOException if there are issues communicating with the Netconf server.
      */
     public BufferedReader runShellCommandRunning(String command)
@@ -601,14 +633,118 @@ public class Device implements AutoCloseable {
         if (!isConnected()) {
             throw new IOException("Could not find open connection");
         }
+        return openExecChannelReader(command);
+    }
+
+    private BufferedReader openExecChannelReader(String command) throws IOException {
         ChannelExec channel;
         try {
             channel = (ChannelExec) sshSession.openChannel("exec");
         } catch (JSchException e) {
             throw new NetconfException(String.format("Failed to open exec session: %s", e.getMessage()), e);
         }
-        InputStream stdout = channel.getInputStream();
-        return new BufferedReader(new InputStreamReader(stdout, Charset.defaultCharset()));
+        try {
+            channel.setCommand(command);
+            InputStream stdout = channel.getInputStream();
+            channel.connect(connectionTimeout);
+            return new BufferedReader(new InputStreamReader(
+                new TimeoutAwareChannelInputStream(stdout, channel, commandTimeout),
+                Charset.defaultCharset())) {
+                @Override
+                public void close() throws IOException {
+                    try {
+                        super.close();
+                    } finally {
+                        channel.disconnect();
+                    }
+                }
+            };
+        } catch (JSchException e) {
+            channel.disconnect();
+            throw new NetconfException(String.format("Failed to start exec session: %s", e.getMessage()), e);
+        } catch (IOException e) {
+            channel.disconnect();
+            throw e;
+        }
+    }
+
+    private static final class TimeoutAwareChannelInputStream extends InputStream {
+        private final InputStream delegate;
+        private final ChannelExec channel;
+        private final int timeoutMillis;
+
+        private TimeoutAwareChannelInputStream(InputStream delegate, ChannelExec channel, int timeoutMillis) {
+            this.delegate = delegate;
+            this.channel = channel;
+            this.timeoutMillis = timeoutMillis;
+        }
+
+        @Override
+        public int read() throws IOException {
+            byte[] oneByte = new byte[1];
+            int bytesRead = read(oneByte, 0, 1);
+            if (bytesRead < 0) {
+                return -1;
+            }
+            return oneByte[0] & 0xFF;
+        }
+
+        @Override
+        public int read(byte[] buffer, int off, int len) throws IOException {
+            Objects.requireNonNull(buffer, "buffer");
+            if (off < 0 || len < 0 || len > buffer.length - off) {
+                throw new IndexOutOfBoundsException();
+            }
+            if (len == 0) {
+                return 0;
+            }
+            if (timeoutMillis <= 0) {
+                return delegate.read(buffer, off, len);
+            }
+
+            long deadlineNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis);
+            while (true) {
+                int available = delegate.available();
+                if (available > 0) {
+                    int bytesRead = delegate.read(buffer, off, Math.min(len, available));
+                    if (bytesRead != 0) {
+                        return bytesRead;
+                    }
+                } else if (channel.isClosed()) {
+                    return delegate.read(buffer, off, len);
+                }
+
+                long remainingNanos = deadlineNanos - System.nanoTime();
+                if (remainingNanos <= 0) {
+                    throw new SocketTimeoutException("Command timeout limit was exceeded: " + timeoutMillis);
+                }
+                sleepForAvailableData(remainingNanos);
+            }
+        }
+
+        @Override
+        public void close() throws IOException {
+            delegate.close();
+        }
+
+        @Override
+        public int available() throws IOException {
+            return delegate.available();
+        }
+
+        private void sleepForAvailableData(long remainingNanos) throws InterruptedIOException {
+            long sleepMillis = Math.min(SHELL_READ_POLL_INTERVAL_MILLIS,
+                Math.max(1L, TimeUnit.NANOSECONDS.toMillis(remainingNanos)));
+            try {
+                Thread.sleep(sleepMillis);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                InterruptedIOException interrupted = new InterruptedIOException(
+                    "Interrupted while waiting for shell command output.");
+                interrupted.initCause(e);
+                throw interrupted;
+            }
+        }
     }
 
     /**
@@ -748,6 +884,20 @@ public class Device implements AutoCloseable {
                 "to establish a connection first.");
         }
         return this.netconfSession.getSessionId();
+    }
+
+    /**
+     * Returns the negotiated capability view for the active NETCONF session.
+     *
+     * @return immutable capability snapshot
+     * @throws IllegalStateException if the connection is not established
+     */
+    public NegotiatedCapabilities getNegotiatedCapabilities() {
+        if (netconfSession == null) {
+            throw new IllegalStateException("Cannot get negotiated capabilities, you need "
+                + "to establish a connection first.");
+        }
+        return this.netconfSession.getNegotiatedCapabilities();
     }
 
     /**
@@ -1137,8 +1287,13 @@ public class Device implements AutoCloseable {
     /**
      * Validate the candidate configuration.
      *
-     * @return true if validation successful.
+     * @return {@code true} if validation completed with a clean {@code <ok/>}
+     *         reply; {@code false} for warning-only or other non-error
+     *         non-{@code <ok/>} replies
      * @throws java.io.IOException      If there are errors communicating with the netconf server.
+     * @throws net.juniper.netconf.ValidateException if the server returns one
+     *                                               or more {@code <rpc-error>}
+     *                                               elements
      * @throws org.xml.sax.SAXException If there are errors parsing the XML reply.
      */
     public boolean validate() throws IOException, SAXException {

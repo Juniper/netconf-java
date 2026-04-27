@@ -8,13 +8,17 @@
 
 package net.juniper.netconf;
 
-import java.io.IOException;
+import net.juniper.netconf.element.RpcReply;
 
 /**
  * Describes exceptions related to commit operation
  */
-public class CommitException extends IOException {
+public class CommitException extends RpcErrorException {
     CommitException(String msg) {
         super(msg);
+    }
+
+    CommitException(String msg, RpcReply rpcReply) {
+        super(msg, rpcReply);
     }
 }

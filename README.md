@@ -34,6 +34,16 @@ mvn clean package
 ```
 (The wrapper script downloads the correct Gradle version automatically.)
 
+To run the live NETCONF integration suite with Gradle:
+
+```bash
+NETCONF_HOST=192.168.1.1 \
+NETCONF_USERNAME=admin \
+NETCONF_PASSWORD=secret \
+NETCONF_PORT=830 \
+./gradlew integrationTest
+```
+
 Releases
 ========
 Releases contain source code only. Due to changing JDK licensing, jar files are not released.
@@ -47,10 +57,27 @@ User may download the source code and compile it with desired JDK version.
 * Instructions to build using `mvn`
   * Download Source Code for the required release
   * Compile the code and build the jar using `mvn package`
-  * Use the jar file from (source to netconf-java)/netconf-java/target
+  * Use the jar file from `./target/`
   * Use `mvn versions:display-dependency-updates` to identify possible target versions for dependencies
   
 =======
+
+v2.2.1
+------
+* Hardened NETCONF XML parsing against XXE and DTD-based attacks
+* Fixed NETCONF RPC framing and `message-id` reply correlation for sequential session reuse
+* Enforced shared NETCONF base capability negotiation and derive session framing from the negotiated base version
+* Capability-gated candidate, validate, and confirmed-commit operations before sending RPCs
+* Added negotiated capability inspection via `Device.getNegotiatedCapabilities()` and `NetconfSession.getNegotiatedCapabilities()`
+* Typed NETCONF `<rpc-error>` replies as structured exceptions so callers can inspect server-reported error details
+* Added `ValidateException` and clarified `validate()` semantics: server `rpc-error` replies throw, while warning-only or other non-`<ok/>` non-error replies still return `false`
+* Improved SSH/NETCONF session cleanup on failed connection or session initialization
+* Fixed shell exec helpers so commands are set, channels are connected, and timeout/cleanup behavior is more predictable
+* Fixed nested XML path construction in the XML helper
+* Documented `NetconfSession` as a sequential request/response channel rather than a concurrent in-flight RPC transport
+* Added [`docs/compatibility.md`](docs/compatibility.md) with current RFC, capability, NMDA, and extension support details
+* Added a dedicated Gradle `integrationTest` task that forwards NETCONF connection settings for live-server testing
+* Upgraded `assertj-core` to `3.27.7` to address `CVE-2026-24400`
 
 v2.2.0
 ------
@@ -96,6 +123,7 @@ SYNOPSIS
 import java.io.IOException;
 import javax.xml.parsers.ParserConfigurationException;
 import net.juniper.netconf.NetconfException;
+import net.juniper.netconf.ValidateException;
 import org.xml.sax.SAXException;
 
 import net.juniper.netconf.XML;
@@ -105,30 +133,57 @@ public class ShowInterfaces {
     public static void main(String args[]) throws NetconfException,
                 ParserConfigurationException, SAXException, IOException {
 
-        //Create device
-        Device device = Device.builder()
-                            .hostName("hostname")
-                            .userName("username")
-                            .password("password")
-                            .connectionTimeout(2000)
-                            .hostKeysFileName("hostKeysFileName")
-                            .build(); 
-        device.connect();
+        try (Device device = Device.builder()
+                .hostName("hostname")
+                .userName("username")
+                .password("password")
+                .hostKeysFileName("hostKeysFileName")
+                .connectionTimeout(2000)
+                .commandTimeout(5000)
+                .build()) {
 
-        //Send RPC and receive RPC Reply as XML
-        XML rpc_reply = device.executeRPC("get-interface-information");
-        /* OR
-            * device.executeRPC("<get-interface-information/>");
-            * OR
-            * device.executeRPC("<rpc><get-interface-information/></rpc>");
-            */
+            // Establish the SSH transport and the default NETCONF session.
+            device.connect();
 
-        //Print the RPC-Reply and close the device.
-        System.out.println(rpc_reply);
-        device.close();
+            // Send RPC and receive RPC reply as XML.
+            XML rpcReply = device.executeRPC("get-interface-information");
+            /* OR
+             * device.executeRPC("<get-interface-information/>");
+             * OR
+             * device.executeRPC("<rpc><get-interface-information/></rpc>");
+             */
+
+            System.out.println(rpcReply);
+        }
     }
 }
 ```
+
+Candidate validate example:
+
+```Java
+try {
+    boolean clean = device.validate();
+    if (!clean) {
+        // Warning-only or other non-error, non-<ok/> reply.
+        System.out.println("Validate completed without rpc-error, but did not return <ok/>");
+    }
+} catch (ValidateException e) {
+    // Server returned one or more <rpc-error> elements.
+    System.err.println("Validate failed: " + e.getMessage());
+    e.getRpcErrors().forEach(System.err::println);
+}
+```
+
+Recommended usage:
+
+* Build one `Device` per target connection and use `try-with-resources` so SSH resources are released predictably.
+* Call `connect()` before issuing RPCs. If `connect()` throws, no usable NETCONF session was established.
+* Inspect `getNegotiatedCapabilities()` after `connect()` if your application needs to branch on server support for candidate, validate, or confirmed-commit behavior.
+* Set `connectionTimeout` and `commandTimeout` explicitly for production use rather than relying on defaults.
+* Prefer NETCONF RPC helpers (`executeRPC`, `getConfig`, `loadXMLConfiguration`, `commit`, and friends) for device operations; use shell helpers only for device-specific workflows that are not available over NETCONF.
+* Treat `ValidateException` as the server-side `rpc-error` path for `validate()`. A `false` return now means the reply was non-error but not a clean `<ok/>`, typically warnings.
+* Shell helper reads are bounded by `commandTimeout`. If you use `runShellCommandRunning(...)`, always close the returned reader so the underlying exec channel is released.
 
 LICENSE
 =======
