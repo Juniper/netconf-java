@@ -73,7 +73,7 @@ public class NetconfSession {
     private String serverCapability;
     private Hello serverHello;
 
-    private final InputStream stdInStreamFromDevice;
+    private final DeviceInputReader deviceReader;
     private final OutputStream stdOutStreamToDevice;
 
     private String lastRpcReply;
@@ -108,6 +108,14 @@ public class NetconfSession {
     private boolean useChunkedFraming;
     private NegotiatedCapabilities negotiatedCapabilities;
     private byte[] unreadBytes = new byte[0];
+    /**
+     * Deadline ({@link System#nanoTime()}) for the whole of the reply being read by {@link #getRpcReply}, or
+     * null when no such read is running. Streaming reads have no overall deadline; each read instead times
+     * out after {@code commandTimeout} without data.
+     */
+    private Long replyDeadlineNanos;
+    /** Bytes consumed while reading the current reply, so they can be restored if the read times out. */
+    private ByteArrayOutputStream consumedBytes;
 
     private record PreparedRpc(String xml, String messageId) { }
 
@@ -132,7 +140,7 @@ public class NetconfSession {
                    String hello,
                    DocumentBuilder builder) throws IOException {
 
-        stdInStreamFromDevice = netconfChannel.getInputStream();
+        deviceReader = new DeviceInputReader(netconfChannel.getInputStream(), "netconf-reader");
         stdOutStreamToDevice = netconfChannel.getOutputStream();
         try {
             netconfChannel.connect(connectionTimeout);
@@ -145,7 +153,12 @@ public class NetconfSession {
         this.builder = builder;
         this.clientCapabilities = clientCapabilities == null ? List.of() : List.copyOf(clientCapabilities);
 
-        sendHello(hello);
+        try {
+            sendHello(hello);
+        } catch (IOException | RuntimeException e) {
+            deviceReader.stop();
+            throw e;
+        }
     }
 
     private static List<String> defaultClientCapabilities() {
@@ -169,58 +182,59 @@ public class NetconfSession {
     }
 
     @VisibleForTesting
-    String getRpcReply(String rpc) throws IOException {
-        PreparedRpc preparedRpc = sendRpcRequest(rpc);
-        String reply;
-        if (useChunkedFraming) {
-            reply = readChunkedRpcReply();
-        } else {
-            reply = readLegacyRpcReply();
+    String getRpcReply(final String rpc) throws IOException {
+        // write the rpc to the device
+        final PreparedRpc preparedRpc = sendRpcRequest(rpc);
+
+        replyDeadlineNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(commandTimeout);
+        consumedBytes = new ByteArrayOutputStream();
+        try {
+            final String reply = useChunkedFraming ? readChunkedRpcReply() : readLegacyRpcReply();
+            validateReplyMessageId(preparedRpc.messageId(), reply);
+            return reply;
+        } catch (final SocketTimeoutException e) {
+            // Put back the partial reply so the session stays aligned if the device replies later
+            pushBackBytes(consumedBytes.toByteArray());
+            throw new SocketTimeoutException("Command timeout limit was exceeded: " + commandTimeout);
+        } finally {
+            replyDeadlineNanos = null;
+            consumedBytes = null;
         }
-        validateReplyMessageId(preparedRpc.messageId(), reply);
-        return reply;
     }
 
     private String readLegacyRpcReply() throws IOException {
         final byte[] buffer = new byte[BUFFER_SIZE];
         final ByteArrayOutputStream rpcReply = new ByteArrayOutputStream();
-        final long startTime = System.nanoTime();
-        boolean timeoutNotExceeded = true;
-        int promptPosition = -1;
-        while (promptPosition < 0 &&
-                (timeoutNotExceeded = !commandTimedOut(startTime))) {
+        while (true) {
             int bytesRead = readIncomingBytes(buffer);
             if (bytesRead < 0) {
                 throw new NetconfException("Input Stream has been closed during reading.");
             }
             rpcReply.write(buffer, 0, bytesRead);
             byte[] rpcReplyBytes = rpcReply.toByteArray();
-            promptPosition = indexOf(rpcReplyBytes, DEVICE_PROMPT_BYTES);
+            final int promptPosition = indexOf(rpcReplyBytes, DEVICE_PROMPT_BYTES);
             if (promptPosition >= 0) {
                 int unreadStart = promptPosition + DEVICE_PROMPT_BYTES.length;
                 if (unreadStart < rpcReplyBytes.length) {
                     pushBackBytes(Arrays.copyOfRange(rpcReplyBytes, unreadStart, rpcReplyBytes.length));
                 }
                 String reply = new String(rpcReplyBytes, 0, promptPosition, StandardCharsets.UTF_8);
-                log.debug("Received Netconf RPC-Reply\n{}", reply);
+                log.debug("Received legacy Netconf RPC-Reply\n{}", reply);
                 return reply;
             }
         }
-
-        throw new SocketTimeoutException("Command timeout limit was exceeded: " + commandTimeout);
     }
 
     private String readChunkedRpcReply() throws IOException {
-        final long startTime = System.nanoTime();
         final ByteArrayOutputStream rpcReply = new ByteArrayOutputStream();
-        while (!commandTimedOut(startTime)) {
-            String header = readChunkHeaderLine(startTime);
+        while (true) {
+            String header = readChunkHeaderLine();
             if (header.isEmpty()) {
                 continue;
             }
             if ("##".equals(header)) {
                 String reply = rpcReply.toString(StandardCharsets.UTF_8);
-                log.debug("Received Netconf RPC-Reply\n{}", reply);
+                log.debug("Received chunked Netconf RPC-Reply\n{}", reply);
                 return reply;
             }
             if (!header.startsWith("#")) {
@@ -235,9 +249,8 @@ public class NetconfSession {
             if (chunkSize < 0) {
                 throw new NetconfException("Invalid NETCONF chunk size: " + header);
             }
-            rpcReply.write(readExactBytes(chunkSize, startTime));
+            rpcReply.write(readExactBytes(chunkSize));
         }
-        throw new SocketTimeoutException("Command timeout limit was exceeded: " + commandTimeout);
     }
 
     private BufferedReader getRpcReplyRunning(String rpc) throws IOException {
@@ -684,6 +697,7 @@ public class NetconfSession {
                 NetconfConstants.DEVICE_PROMPT;
         setLastRpcReply(getRpcReply(rpc));
         netconfChannel.disconnect();
+        deviceReader.stop();
     }
 
     /**
@@ -1427,18 +1441,42 @@ public class NetconfSession {
             int bytesToCopy = Math.min(buffer.length, unreadBytes.length);
             System.arraycopy(unreadBytes, 0, buffer, 0, bytesToCopy);
             unreadBytes = Arrays.copyOfRange(unreadBytes, bytesToCopy, unreadBytes.length);
+            recordConsumed(buffer, 0, bytesToCopy);
             return bytesToCopy;
         }
-        return stdInStreamFromDevice.read(buffer, 0, buffer.length);
+        final int bytesRead = deviceReader.read(buffer, 0, buffer.length, readDeadlineNanos());
+        recordConsumed(buffer, 0, bytesRead);
+        return bytesRead;
+    }
+
+    private boolean hasImmediateData() {
+        return unreadBytes.length > 0 || deviceReader.hasBufferedData();
+    }
+
+    private long readDeadlineNanos() {
+        return replyDeadlineNanos != null
+            ? replyDeadlineNanos
+            : System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(commandTimeout);
+    }
+
+    private void recordConsumed(byte[] bytes, int offset, int length) {
+        if (consumedBytes != null && length > 0) {
+            consumedBytes.write(bytes, offset, length);
+        }
     }
 
     private int readIncomingByte() throws IOException {
         if (unreadBytes.length > 0) {
             int nextByte = unreadBytes[0] & 0xFF;
             unreadBytes = Arrays.copyOfRange(unreadBytes, 1, unreadBytes.length);
+            recordConsumed(new byte[] {(byte) nextByte}, 0, 1);
             return nextByte;
         }
-        return stdInStreamFromDevice.read();
+        final int deviceByte = deviceReader.read(readDeadlineNanos());
+        if (deviceByte >= 0) {
+            recordConsumed(new byte[] {(byte) deviceByte}, 0, 1);
+        }
+        return deviceByte;
     }
 
     private void pushBackBytes(byte[] bytes) {
@@ -1451,48 +1489,50 @@ public class NetconfSession {
         unreadBytes = combined;
     }
 
-    private String readChunkHeaderLine(long startTime) throws IOException {
-        ByteArrayOutputStream lineBuffer = new ByteArrayOutputStream();
-        while (!commandTimedOut(startTime)) {
+    private String readChunkHeaderLine() throws IOException {
+        return readChunkHeaderLine(new ByteArrayOutputStream());
+    }
+
+    /**
+     * Reads a chunk header line, appending to {@code lineBuffer}. If the read times out the partial line stays
+     * in the buffer, so a caller that passes the same buffer again resumes where it stopped.
+     */
+    private String readChunkHeaderLine(ByteArrayOutputStream lineBuffer) throws IOException {
+        while (true) {
             int nextByte = readIncomingByte();
             if (nextByte < 0) {
                 throw new NetconfException("Input Stream has been closed during reading.");
             }
             if (nextByte == '\n') {
-                return lineBuffer.toString(StandardCharsets.UTF_8);
+                final String line = lineBuffer.toString(StandardCharsets.UTF_8);
+                lineBuffer.reset();
+                return line;
             }
             if (nextByte != '\r') {
                 lineBuffer.write(nextByte);
             }
         }
-        throw new SocketTimeoutException("Command timeout limit was exceeded: " + commandTimeout);
     }
 
-    private byte[] readExactBytes(int expectedLength, long startTime) throws IOException {
+    private byte[] readExactBytes(int expectedLength) throws IOException {
         byte[] chunkBytes = new byte[expectedLength];
         int offset = 0;
-        while (offset < expectedLength && !commandTimedOut(startTime)) {
+        while (offset < expectedLength) {
             int bytesRead;
             if (unreadBytes.length > 0) {
                 bytesRead = Math.min(expectedLength - offset, unreadBytes.length);
                 System.arraycopy(unreadBytes, 0, chunkBytes, offset, bytesRead);
                 unreadBytes = Arrays.copyOfRange(unreadBytes, bytesRead, unreadBytes.length);
             } else {
-                bytesRead = stdInStreamFromDevice.read(chunkBytes, offset, expectedLength - offset);
+                bytesRead = deviceReader.read(chunkBytes, offset, expectedLength - offset, readDeadlineNanos());
             }
+            recordConsumed(chunkBytes, offset, bytesRead);
             if (bytesRead < 0) {
                 throw new NetconfException("Input Stream has been closed during reading.");
             }
             offset += bytesRead;
         }
-        if (offset < expectedLength) {
-            throw new SocketTimeoutException("Command timeout limit was exceeded: " + commandTimeout);
-        }
         return chunkBytes;
-    }
-
-    private boolean commandTimedOut(long startTime) {
-        return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startTime) >= commandTimeout;
     }
 
     private NegotiatedCapabilities requireNegotiatedCapabilities() {
@@ -1529,7 +1569,6 @@ public class NetconfSession {
 
     private abstract class RpcReplyInputStream extends InputStream {
 
-        private final long startTime = System.nanoTime();
         private boolean finished;
         private boolean closed;
 
@@ -1565,8 +1604,15 @@ public class NetconfSession {
             }
             buffer[off] = (byte) firstByte;
             int bytesRead = 1;
-            while (bytesRead < len) {
-                int nextByte = read();
+            // Return what we have rather than waiting for the buffer to fill, so streamed output is delivered promptly
+            while (bytesRead < len && hasImmediateData()) {
+                int nextByte;
+                try {
+                    nextByte = read();
+                } catch (SocketTimeoutException e) {
+                    // The reply stopped mid-token (e.g. part of a prompt). Deliver what was read so far.
+                    break;
+                }
                 if (nextByte < 0) {
                     break;
                 }
@@ -1595,9 +1641,6 @@ public class NetconfSession {
         protected abstract int readPayloadByte() throws IOException;
 
         protected final int readIncomingByteOrThrow() throws IOException {
-            if (commandTimedOut(startTime)) {
-                throw new SocketTimeoutException("Command timeout limit was exceeded: " + commandTimeout);
-            }
             int nextByte = readIncomingByte();
             if (nextByte < 0) {
                 throw new NetconfException("Input Stream has been closed during reading.");
@@ -1605,8 +1648,8 @@ public class NetconfSession {
             return nextByte;
         }
 
-        protected final String readChunkHeaderLine() throws IOException {
-            return NetconfSession.this.readChunkHeaderLine(startTime);
+        protected final String readChunkHeaderLine(ByteArrayOutputStream lineBuffer) throws IOException {
+            return NetconfSession.this.readChunkHeaderLine(lineBuffer);
         }
     }
 
@@ -1625,7 +1668,9 @@ public class NetconfSession {
                     candidateLength = 0;
                     return -1;
                 }
-                candidatePrompt[candidateLength++] = (byte) readIncomingByteOrThrow();
+                // Read first: if this times out, the candidate state must not have changed
+                final byte nextByte = (byte) readIncomingByteOrThrow();
+                candidatePrompt[candidateLength++] = nextByte;
             }
         }
 
@@ -1651,11 +1696,12 @@ public class NetconfSession {
     private final class ChunkedRpcReplyInputStream extends RpcReplyInputStream {
 
         private int remainingChunkBytes;
+        private final ByteArrayOutputStream headerBuffer = new ByteArrayOutputStream();
 
         @Override
         protected int readPayloadByte() throws IOException {
             while (remainingChunkBytes == 0) {
-                String header = readChunkHeaderLine();
+                String header = readChunkHeaderLine(headerBuffer);
                 if (header.isEmpty()) {
                     continue;
                 }
@@ -1674,8 +1720,9 @@ public class NetconfSession {
                     throw new NetconfException("Invalid NETCONF chunk size: " + header);
                 }
             }
+            final int nextByte = readIncomingByteOrThrow();
             remainingChunkBytes--;
-            return readIncomingByteOrThrow();
+            return nextByte;
         }
     }
 
